@@ -3,16 +3,22 @@
 
 /* ─── Light mode token defaults ─────────────────────────────────────────── */
 :root {
-  --bg-dark: #FFFFFF;
-  --surface: #FFF7F2;
-  --elevated: #FFEDE0;
-  --border-custom: #FFD4B3;
-  --border-active: #FF8C42;
+  --bg-dark: #F5F5F0;
+  --surface: #FFFFFF;
+  --elevated: #FFFFFF;
+  --border-custom: #E5E5E0;
+  --border-active: #FF6B1A;
   --accent-blue: #FF6B1A;
   --accent-secondary: #FF8C42;
-  --text-primary: #1A0A00;
-  --text-secondary: #6B3A1F;
-  --text-muted: #A0622A;
+  --text-primary: #0A0A0A;
+  --text-secondary: #444440;
+  --text-muted: #888880;
+
+  --sidebar-active-bg: #FFF3EC;
+  --sidebar-active-text: #FF6B1A;
+  --sidebar-active-border: #FF6B1A;
+  --sidebar-inactive-text: #444440;
+  --sidebar-hover-bg: #FFF9F5;
 }
 
 /* ─── Dark mode tokens ───────────────────────────────────────────────────── */
@@ -27,6 +33,12 @@
   --text-primary: #FFFFFF;
   --text-secondary: #FFD4B3;
   --text-muted: #A0622A;
+
+  --sidebar-active-bg: rgba(255, 107, 26, 0.1);
+  --sidebar-active-text: #FF6B1A;
+  --sidebar-active-border: #FF6B1A;
+  --sidebar-inactive-text: #A0622A;
+  --sidebar-hover-bg: rgba(255, 107, 26, 0.05);
 }
 
 @theme {

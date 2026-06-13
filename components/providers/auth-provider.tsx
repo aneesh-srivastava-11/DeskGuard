@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, IS_SUPABASE_CONFIGURED } from '@/lib/supabase'
 import type { AppUser, UserRole } from '@/lib/types'
 
 // ─── RBAC domain mapping ───────────────────────────────────────────────────
@@ -54,6 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (!IS_SUPABASE_CONFIGURED) {
+      const stored = localStorage.getItem('mock-user')
+      if (stored) {
+        setUser(JSON.parse(stored))
+      }
+      setLoading(false)
+      return
+    }
+
     // Restore session on mount
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
@@ -78,12 +87,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [resolveUser])
 
   const signIn = async (email: string, password: string): Promise<{ error: string | null }> => {
+    if (!IS_SUPABASE_CONFIGURED) {
+      const role = getRoleFromEmail(email)
+      const namePart = email.split('@')[0].replace(/\./g, ' ')
+      const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1).replace(/\b\w/g, c => c.toUpperCase())
+      const mockUser = {
+        id: 'mock-user-id-' + Math.random().toString(36).substr(2, 9),
+        email,
+        regNo: role === 'student' ? '200905111' : null,
+        name: formattedName,
+        role,
+      }
+      localStorage.setItem('mock-user', JSON.stringify(mockUser))
+      document.cookie = `sb-access-token=mock-token; path=/; max-age=3600; SameSite=Lax; Secure`
+      setUser(mockUser)
+      setLoading(false)
+      return { error: null }
+    }
+
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) return { error: error.message }
     return { error: null }
   }
 
   const signOut = async () => {
+    if (!IS_SUPABASE_CONFIGURED) {
+      localStorage.removeItem('mock-user')
+      document.cookie = `sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure`
+      setUser(null)
+      return
+    }
     await supabase.auth.signOut()
     setUser(null)
   }

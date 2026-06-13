@@ -22,6 +22,23 @@ function QrScanContent() {
   const [checkInSuccess, setCheckInSuccess]      = useState(false)
   const [error, setError]                        = useState<string | null>(null)
   const [tokenValid, setTokenValid]              = useState<boolean | null>(null)
+  const [activeSession, setActiveSession]        = useState<{ id: string; desk_id: string } | null>(null)
+
+  useEffect(() => {
+    const checkSession = async () => {
+      if (!user) return
+      const { data } = await supabase
+        .from('sessions')
+        .select('id, desk_id')
+        .eq('student_id', user.id)
+        .in('status', ['ACTIVE', 'AWAY'])
+        .maybeSingle()
+      if (data) {
+        setActiveSession(data)
+      }
+    }
+    checkSession()
+  }, [user])
 
   useEffect(() => {
     const verify = async () => {
@@ -149,16 +166,30 @@ function QrScanContent() {
               )}
 
               {/* Check-in button */}
-              <button
-                onClick={handleCheckIn}
-                disabled={isChecking || !tokenValid || qrSecondsLeft <= 0}
-                className="w-full h-14 bg-[#4F8EF7] hover:bg-[#4F8EF7]/90 text-white font-display font-bold text-[16px] rounded-[16px] uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-3 shadow-xl shadow-[#4F8EF7]/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isChecking
-                  ? <><Loader2 className="w-5 h-5 animate-spin" /> Verifying…</>
-                  : <><QrCode className="w-5 h-5" /> Check In to {deskId}</>
-                }
-              </button>
+              {activeSession ? (
+                <div className="w-full text-center space-y-3">
+                  <p className="font-mono text-xs text-[var(--text-muted)]">
+                    Active session: {activeSession.desk_id}
+                  </p>
+                  <button
+                    onClick={() => router.push('/dashboard/session')}
+                    className="w-full h-11 bg-[#FF6B1A]/10 border border-[#FF6B1A]/30 text-[#FF6B1A] hover:bg-[#FF6B1A]/20 font-sans text-xs font-bold uppercase tracking-wider rounded-[12px] transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    View My Session
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleCheckIn}
+                  disabled={isChecking || !tokenValid || qrSecondsLeft <= 0}
+                  className="w-full h-14 bg-[#4F8EF7] hover:bg-[#4F8EF7]/90 text-white font-display font-bold text-[16px] rounded-[16px] uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-3 shadow-xl shadow-[#4F8EF7]/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isChecking
+                    ? <><Loader2 className="w-5 h-5 animate-spin" /> Verifying…</>
+                    : <><QrCode className="w-5 h-5" /> Check In to {deskId}</>
+                  }
+                </button>
+              )}
 
               <p className="font-mono text-[10px] text-[#6B7280] text-center">
                 QR link expires in <span className="text-white font-bold">{qrSecondsLeft}s</span> · Must be logged in

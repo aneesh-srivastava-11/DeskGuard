@@ -78,94 +78,98 @@ export default function BookManagementPage() {
 
   return (
     <div className="space-y-8">
-      <div className="border-b border-[#2A2A38] pb-5">
-        <h2 className="font-display font-bold text-[22px] text-white tracking-tight">Book Management</h2>
-        <p className="font-sans text-[13px] text-[#6B7280] mt-1">Issue and return books, manage overdue alerts</p>
+      <div className="flex items-center justify-between border-b border-[var(--border-custom)] h-[52px] px-6">
+        <div>
+          <h2 className="font-display font-bold text-[22px] text-[var(--text-primary)] tracking-tight">Book Management</h2>
+        </div>
+        <p className="font-sans text-[11px] text-[var(--text-muted)] uppercase hidden sm:block">
+          Issue, return and reminders
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Issue form */}
-        <div id="book-issue-form-block" className="bg-[#13131A] border border-[#2A2A38] rounded-[16px] p-6 space-y-5">
+        <div id="book-issue-form-block" className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] p-6 space-y-5">
           <div className="flex items-center space-x-2">
             <BookOpen className="w-4 h-4 text-[#FF6B1A]" />
-            <h3 className="font-display font-bold text-sm text-white">Issue Book</h3>
+            <h3 className="font-display font-bold text-sm text-[var(--text-primary)]">Issue Book</h3>
           </div>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="block font-mono text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              <label className="block font-mono text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                 Student Reg. No. or Email
               </label>
               <input
                 id="lib-issue-reg-input"
                 type="text"
                 placeholder="221CS1034 or aneesh@muj.manipal.edu"
-                className="w-full h-12 px-4 font-mono text-[13px] bg-[#0A0A0F] border border-[#2A2A38] rounded-[12px] text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
+                className="w-full h-12 px-4 font-mono text-[13px] bg-[var(--bg-dark)] border border-[var(--border-custom)] rounded-[12px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
                 value={libIssueReg}
                 onChange={(e) => setLibIssueReg(e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
-              <label className="block font-mono text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              <label className="block font-mono text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                 Book ISBN
               </label>
               <input
                 id="lib-issue-isbn-input"
                 type="text"
                 placeholder="978-0132126953"
-                className="w-full h-12 px-4 font-mono text-[13px] bg-[#0A0A0F] border border-[#2A2A38] rounded-[12px] text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
+                className="w-full h-12 px-4 font-mono text-[13px] bg-[var(--bg-dark)] border border-[var(--border-custom)] rounded-[12px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
                 value={libIssueIsbn}
                 onChange={(e) => setLibIssueIsbn(e.target.value)}
               />
             </div>
           </div>
           <button onClick={handleConfirmIssue}
-            className="w-full h-11 bg-[#FF6B1A] hover:bg-[#FF6B1A]/90 text-white font-display font-medium rounded-[12px] transition-all cursor-pointer text-sm">
+            className="w-full h-11 bg-[#FF6B1A] hover:bg-[#FF6B1A]/90 text-white font-display font-medium rounded-[12px] transition-all cursor-pointer text-sm shadow-md">
             Confirm Issue
           </button>
         </div>
 
         {/* Return form */}
-        <div id="book-return-form-block" className="bg-[#13131A] border border-[#2A2A38] rounded-[16px] p-6 space-y-5">
+        <div id="book-return-form-block" className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] p-6 space-y-5">
           <div className="flex items-center space-x-2">
             <BookOpen className="w-4 h-4 text-[#22C55E]" />
-            <h3 className="font-display font-bold text-sm text-white">Return Book</h3>
+            <h3 className="font-display font-bold text-sm text-[var(--text-primary)]">Return Book</h3>
           </div>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="block font-mono text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              <label className="block font-mono text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                 Book ISBN
               </label>
               <input
                 id="lib-return-isbn-input"
                 type="text"
                 placeholder="978-0132126953"
-                className="w-full h-12 px-4 font-mono text-[13px] bg-[#0A0A0F] border border-[#2A2A38] rounded-[12px] text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-[#22C55E] focus:border-[#22C55E] transition-all"
+                className="w-full h-12 px-4 font-mono text-[13px] bg-[var(--bg-dark)] border border-[var(--border-custom)] rounded-[12px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[#22C55E] focus:border-[#22C55E] transition-all"
                 value={libReturnIsbn}
                 onChange={(e) => setLibReturnIsbn(e.target.value)}
               />
             </div>
           </div>
           <button onClick={handleMarkReturned}
-            className="w-full h-11 bg-[#22C55E] hover:bg-[#22C55E]/90 text-white font-display font-medium rounded-[12px] transition-all cursor-pointer text-sm mt-8">
+            className="w-full h-11 bg-[#22C55E] hover:bg-[#22C55E]/90 text-white font-display font-medium rounded-[12px] transition-all cursor-pointer text-sm mt-8 shadow-md">
             Process Return
           </button>
         </div>
       </div>
 
       {/* Overdue list */}
-      <div className="bg-[#13131A] border border-[#2A2A38] rounded-[16px] overflow-hidden">
-        <div className="p-5 border-b border-[#2A2A38]">
-          <h3 className="font-display font-bold text-sm text-white">Overdue Returns</h3>
-          <p className="text-[11px] font-sans text-[#6B7280] mt-0.5">{overdueBooks.length} outstanding overdue items</p>
+      <div className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] overflow-hidden">
+        <div className="p-5 border-b border-[var(--border-custom)]">
+          <h3 className="font-display font-bold text-sm text-[var(--text-primary)]">Overdue Returns</h3>
+          <p className="text-[11px] font-sans text-[var(--text-muted)] mt-0.5">{overdueBooks.length} outstanding overdue items</p>
         </div>
-        <div className="divide-y divide-[#2A2A38]/50">
+        <div className="divide-y divide-[var(--border-custom)]/50">
           {overdueBooks.map((item) => (
             <div key={item.id} id={`overdue-row-${item.id}`}
-              className="flex items-center justify-between px-5 py-4 hover:bg-[#1C1C26]/30 transition-colors">
+              className="flex items-center justify-between px-5 py-4 hover:bg-[var(--elevated)]/30 transition-colors">
               <div className="space-y-0.5 min-w-0 flex-1 mr-4">
-                <p className="text-xs font-medium text-white truncate">{item.title}</p>
+                <p className="text-xs font-medium text-[var(--text-primary)] truncate">{item.title}</p>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-[#6B7280]">{item.reg}</span>
+                  <span className="font-mono text-[10px] text-[var(--text-secondary)]">{item.reg}</span>
                   <span className="text-[10px] text-[#EF4444] font-semibold">{item.overdueText}</span>
                 </div>
               </div>
