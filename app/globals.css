@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+@import "tailwindcss";
+
+/* ─── Light mode token defaults ─────────────────────────────────────────── */
+:root {
+  --bg-dark: #FFFFFF;
+  --surface: #FFF7F2;
+  --elevated: #FFEDE0;
+  --border-custom: #FFD4B3;
+  --border-active: #FF8C42;
+  --accent-blue: #FF6B1A;
+  --accent-secondary: #FF8C42;
+  --text-primary: #1A0A00;
+  --text-secondary: #6B3A1F;
+  --text-muted: #A0622A;
+}
+
+/* ─── Dark mode tokens ───────────────────────────────────────────────────── */
+.dark {
+  --bg-dark: #0A0A0F;
+  --surface: #13131A;
+  --elevated: #1C1C26;
+  --border-custom: #2A2A38;
+  --border-active: #FF6B1A;
+  --accent-blue: #FF6B1A;
+  --accent-secondary: #FF8C42;
+  --text-primary: #FFFFFF;
+  --text-secondary: #FFD4B3;
+  --text-muted: #A0622A;
+}
+
+@theme {
+  --color-bg-dark: var(--bg-dark);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-border-custom: var(--border-custom);
+  --color-accent-blue: var(--accent-blue);
+
+  --color-status-free: #16A34A;
+  --color-status-occupied: #DC2626;
+  --color-status-away: #D97706;
+  --color-status-abandoned: #B91C1C;
+  --color-status-maintenance: #6B7280;
+
+  --font-sans: 'Inter', sans-serif;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  transition: background-color 0.2s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Hide scrollbars globally for map/scroll areas */
+.scrollbar-none {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── Mobile overrides (max-width 768px) ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Scale down large headings */
+  .text-\[48px\], .text-\[64px\], .text-\[80px\] {
+    font-size: 2rem !important;
+  }
+  /* Reduce excessive padding */
+  .p-10 { padding: 1.25rem !important; }
+  .p-8  { padding: 1rem !important; }
+  /* Stat cards: 1 column */
+  .grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
