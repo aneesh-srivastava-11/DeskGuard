@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   GraduationCap, Map as MapIcon, Clock, BookOpenCheck,
   UserSquare2, Lock, LogOut, Sun, Moon,
@@ -11,9 +11,15 @@ import { useTheme } from '@/components/providers/theme-provider'
 
 export function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const { user, signOut } = useAuth()
   const { isDarkMode, toggleTheme } = useTheme()
   const isLibrarian = user?.role === 'librarian'
+
+  const handleSignOut = async () => {
+    await signOut()
+    router.push('/')
+  }
 
   // Student nav items
   const studentNav = [
@@ -116,11 +122,11 @@ export function Sidebar() {
         {/* Logout */}
         <button
           id={isLibrarian ? 'btn-switch-portal-librarian' : 'btn-logout-to-s1'}
-          onClick={signOut}
+          onClick={handleSignOut}
           className="w-full h-9 rounded-[10px] bg-[var(--elevated)] hover:bg-[var(--surface)] text-[11px] text-[var(--text-secondary)] font-sans font-medium flex items-center justify-center gap-2 border border-[var(--border-custom)] cursor-pointer transition-all active:scale-95"
         >
           <LogOut className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
-          <span className="hidden lg:inline">{isLibrarian ? 'Switch Portal' : 'Log Out'}</span>
+          <span className="hidden lg:inline">Sign Out</span>
         </button>
       </div>
     </aside>

@@ -1,10 +1,18 @@
 'use client'
 
 import { useAuth } from '@/components/providers/auth-provider'
+import { useRouter } from 'next/navigation'
 import { GraduationCap, LogOut, BookOpen, Clock } from 'lucide-react'
 
 export default function ProfilePage() {
   const { user, signOut } = useAuth()
+  const router = useRouter()
+
+  const handleSignOut = async () => {
+    await signOut()
+    router.push('/')
+  }
+
   return (
     <div className="max-w-lg mx-auto space-y-6">
       <div className="flex items-center justify-between border-b border-[var(--border-custom)] h-[52px] px-6">
@@ -37,7 +45,7 @@ export default function ProfilePage() {
             <span className="text-[var(--text-primary)] capitalize">{user?.role === 'librarian' ? 'Librarian + Admin' : 'Student'}</span>
           </div>
         </div>
-        <button onClick={signOut}
+        <button onClick={handleSignOut}
           className="w-full h-11 bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] hover:bg-[#EF4444]/20 font-display font-medium rounded-[12px] flex items-center justify-center gap-2 cursor-pointer transition-all">
           <LogOut className="w-4 h-4" /> Sign Out
         </button>
