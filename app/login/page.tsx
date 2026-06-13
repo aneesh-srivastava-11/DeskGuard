@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'motion/react'
 import { GraduationCap, Eye, EyeOff, Lock, Mail, ShieldAlert, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
@@ -18,8 +18,13 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState('')
 
   // Already logged in
+  useEffect(() => {
+    if (user) {
+      router.replace(user.role === 'librarian' ? '/dashboard/admin' : '/dashboard')
+    }
+  }, [user, router])
+
   if (user) {
-    router.replace(user.role === 'librarian' ? '/dashboard/admin' : '/dashboard')
     return null
   }
 
