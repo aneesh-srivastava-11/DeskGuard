@@ -351,6 +351,16 @@ create policy "librarians can manage book issues"
 create policy "anyone can read settings"
   on settings for select using (true);
 
+create policy "librarians can manage settings"
+  on settings for all
+  using (public.is_librarian())
+  with check (public.is_librarian());
+
+create policy "librarians can manage books"
+  on books for all
+  using (public.is_librarian())
+  with check (public.is_librarian());
+
 -- Seed Desks
 insert into desks (id,label,row_label,
   seat_number,status,has_power,is_window) values
