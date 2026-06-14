@@ -296,6 +296,11 @@ create policy "students can read own record"
   on students for select
   using (auth.uid() = id);
 
+create policy "librarians can manage students"
+  on students for all
+  using (public.is_librarian())
+  with check (public.is_librarian());
+
 create policy "anyone can read desks"
   on desks for select
   using (true);

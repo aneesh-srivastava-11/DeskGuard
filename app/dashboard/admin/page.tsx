@@ -22,15 +22,53 @@ export default function LibrarianDashboardPage() {
   const abandonedDesks = desks.filter((d) => d.status === 'abandoned')
 
   const load = async () => {
-    // 1. Load desks
-    const { data } = await supabase.from('desks').select('*')
-    if (data?.length) {
-      setDesks(data.map((d: Record<string, unknown>) => ({
-        id: d.id as string, row: d.row_label as string, seat: d.seat_number as number,
-        status: (d.status as string).toLowerCase() as Desk['status'],
-        occupiedSince: null, durationText: null, occupantId: null, occupantName: null,
-        hasPower: d.has_power as boolean, isWindow: d.is_window as boolean,
-      })))
+    // 1. Load desks and active sessions
+    const { data: desksData } = await supabase.from('desks').select('*')
+    const { data: sessionsData } = await supabase
+      .from('sessions')
+      .select('desk_id, checked_in_at, students(reg_no, name)')
+      .in('status', ['ACTIVE', 'AWAY', 'ABANDONED'])
+
+    if (desksData?.length) {
+      const activeSessionsMap = new Map<string, any>()
+      if (sessionsData) {
+        sessionsData.forEach((s: any) => {
+          activeSessionsMap.set(s.desk_id, s)
+        })
+      }
+
+      setDesks(desksData.map((d: Record<string, unknown>) => {
+        const deskId = d.id as string
+        const session = activeSessionsMap.get(deskId)
+        
+        let occupiedSince: string | null = null
+        let durationText: string | null = null
+        let occupantId: string | null = null
+        let occupantName: string | null = null
+
+        if (session) {
+          occupiedSince = new Date(session.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          const elapsedMin = Math.floor((Date.now() - new Date(session.checked_in_at).getTime()) / 60000)
+          durationText = elapsedMin > 60 
+            ? `${Math.floor(elapsedMin / 60)}h ${elapsedMin % 60}m` 
+            : `${elapsedMin}m`
+          occupantId = session.students?.reg_no || '—'
+          occupantName = session.students?.name || '—'
+        }
+
+        return {
+          id: deskId,
+          row: d.row_label as string,
+          seat: d.seat_number as number,
+          status: (d.status as string).toLowerCase() as Desk['status'],
+          occupiedSince,
+          durationText,
+          occupantId,
+          occupantName,
+          hasPower: d.has_power as boolean,
+          isWindow: d.is_window as boolean,
+        }
+      }))
     }
 
     // 2. Load pending issue requests count
