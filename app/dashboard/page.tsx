@@ -26,6 +26,8 @@ export default function LiveMapPage() {
     'Row D Seat 4 (D19) status flag set to ABANDONED (idle timer timeout).',
   ])
   const [activeSession, setActiveSession] = useState<{ id: string; desk_id: string } | null>(null)
+  const [scanModalDeskId, setScanModalDeskId] = useState<string | null>(null)
+  const [simulatingScan, setSimulatingScan]   = useState(false)
 
   const isLibrarian = user?.role === 'librarian'
 
@@ -118,9 +120,6 @@ export default function LiveMapPage() {
   const computedAbandoned   = desks.filter((d) => d.status === 'abandoned').length
   const computedMaintenance = desks.filter((d) => d.status === 'maintenance').length
   const totalBooked         = computedOccupied + computedAway + computedAbandoned
-
-  const [scanModalDeskId, setScanModalDeskId] = useState<string | null>(null)
-  const [simulatingScan, setSimulatingScan]   = useState(false)
 
   const handleReserve = async (deskId: string) => {
     if (!user) return
