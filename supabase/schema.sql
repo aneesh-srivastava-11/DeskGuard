@@ -280,6 +280,17 @@ alter table books enable row level security;
 alter table book_issues enable row level security;
 alter table settings enable row level security;
 
+-- Helper function to check if the current user is a librarian
+create or replace function public.is_librarian()
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.students
+    where id = auth.uid() and role = 'librarian'
+  );
+end;
+$$ language plpgsql security definer;
+
 -- Policies
 create policy "students can read own record"
   on students for select
@@ -293,6 +304,11 @@ create policy "service role can write desks"
   on desks for all
   using (auth.role() = 'service_role');
 
+create policy "librarians can manage desks"
+  on desks for all
+  using (public.is_librarian())
+  with check (public.is_librarian());
+
 create policy "students can read own sessions"
   on sessions for select
   using (auth.uid() = student_id);
@@ -301,12 +317,26 @@ create policy "service role can write sessions"
   on sessions for all
   using (auth.role() = 'service_role');
 
+create policy "librarians can manage sessions"
+  on sessions for all
+  using (public.is_librarian())
+  with check (public.is_librarian());
+
 create policy "anyone can read books"
   on books for select using (true);
 
 create policy "students can read own issues"
   on book_issues for select
   using (auth.uid() = student_id);
+
+create policy "students can insert own book requests"
+  on book_issues for insert
+  with check (auth.uid() = student_id and approved = false);
+
+create policy "librarians can manage book issues"
+  on book_issues for all
+  using (public.is_librarian())
+  with check (public.is_librarian());
 
 create policy "anyone can read settings"
   on settings for select using (true);

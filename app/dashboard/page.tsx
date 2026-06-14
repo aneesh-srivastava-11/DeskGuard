@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Bell, RefreshCw, Cpu, Zap, LogOut, QrCode } from 'lucide-react'
+import { Bell, RefreshCw, Cpu, Zap, LogOut, QrCode, Loader2 } from 'lucide-react'
 import { NodeGrid, InfoPanel } from '@/components/map/node-grid'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
@@ -119,9 +119,35 @@ export default function LiveMapPage() {
   const computedMaintenance = desks.filter((d) => d.status === 'maintenance').length
   const totalBooked         = computedOccupied + computedAway + computedAbandoned
 
+  const [scanModalDeskId, setScanModalDeskId] = useState<string | null>(null)
+  const [simulatingScan, setSimulatingScan]   = useState(false)
+
   const handleReserve = async (deskId: string) => {
     if (!user) return
-    addToast(`Opening QR reservation for ${deskId}`, 'info')
+    setScanModalDeskId(deskId)
+  }
+
+  const handleSimulateScan = async () => {
+    if (!scanModalDeskId) return
+    setSimulatingScan(true)
+    try {
+      const res = await fetch(`/api/qr?deskId=${encodeURIComponent(scanModalDeskId)}`)
+      const result = await res.json()
+      if (result.error) {
+        addToast(result.error, 'error')
+      } else if (result.url) {
+        addToast('QR Code scanned! Verifying physical presence...', 'success')
+        router.push(result.url)
+      } else {
+        addToast('Failed to generate verification URL', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      addToast('Scan simulation failed', 'error')
+    } finally {
+      setSimulatingScan(false)
+      setScanModalDeskId(null)
+    }
   }
 
   const handleRelease = async (deskId: string) => {
@@ -403,6 +429,42 @@ export default function LiveMapPage() {
             </div>
           )}
         </AnimatePresence>
+
+        {scanModalDeskId && (
+          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+            <div className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[20px] p-6 space-y-5 max-w-sm w-full shadow-2xl">
+              <div className="flex items-center space-x-3 text-[#FF6B1A]">
+                <QrCode className="w-6 h-6 animate-pulse" />
+                <h3 className="font-display font-bold text-lg text-[var(--text-primary)]">Check-In: {scanModalDeskId}</h3>
+              </div>
+              <p className="text-xs text-[var(--text-secondary)] font-sans leading-relaxed">
+                In the library, you check in by scanning the physical QR code sticker placed on your desk using your mobile phone camera.
+              </p>
+              <div className="p-3 bg-[var(--elevated)] border border-[var(--border-custom)] rounded-[12px] text-center">
+                <span className="text-[10px] font-mono text-[var(--text-muted)] uppercase tracking-wider block">Testing / Development Mode</span>
+              </div>
+              <div className="flex flex-col gap-2 pt-2 text-xs">
+                <button
+                  disabled={simulatingScan}
+                  onClick={handleSimulateScan}
+                  className="w-full h-11 bg-[#FF6B1A] hover:bg-[#FF6B1A]/90 text-white rounded-[10px] font-display font-medium uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all active:scale-95"
+                >
+                  {simulatingScan ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    'Simulate Camera Scan'
+                  )}
+                </button>
+                <button
+                  onClick={() => setScanModalDeskId(null)}
+                  className="w-full h-11 border border-[var(--border-custom)] hover:bg-[var(--elevated)] text-[var(--text-secondary)] rounded-[10px] font-sans font-semibold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { generateQrDataUrl } from '@/lib/crypto-utils'
+import { generateQrDataUrl, generateQRToken } from '@/lib/crypto-utils'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 
@@ -32,8 +32,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'missing_desk_id' }, { status: 400 })
     }
 
+    const qrToken = await generateQRToken(deskId)
     const dataUrl = await generateQrDataUrl(deskId)
-    return NextResponse.json({ success: true, dataUrl })
+    const url = `/scan?desk=${deskId}&token=${encodeURIComponent(qrToken)}`
+    return NextResponse.json({ success: true, dataUrl, url })
   } catch (error: any) {
     console.error('[DeskGuard]', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
