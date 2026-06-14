@@ -59,13 +59,12 @@ export default function SettingsPage() {
       ])
 
       if (error) {
-        // Fallback or warning if settings table does not exist
-        addToast('Settings table not configured. Local changes saved.', 'warning')
+        addToast(`Failed to save settings: ${error.message}`, 'error')
       } else {
-        addToast('Settings saved', 'success')
+        addToast('Settings saved successfully', 'success')
       }
-    } catch (e) {
-      addToast('Settings saved locally', 'info')
+    } catch (e: any) {
+      addToast(`Error saving settings: ${e.message}`, 'error')
     }
   }
 

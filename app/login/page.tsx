@@ -3,7 +3,7 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'motion/react'
-import { GraduationCap, Eye, EyeOff, Lock, Mail, ShieldAlert, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
+import { GraduationCap, Eye, EyeOff, ShieldAlert, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 
 export default function LoginPage() {
@@ -52,17 +52,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="w-full min-h-screen flex flex-col items-center justify-center p-4 relative bg-[#0A0A0F] text-white">
-      {/* Background rings */}
-      <div className="absolute inset-0 pointer-events-none opacity-[0.03]">
-        <div className="absolute top-1/4 left-1/4 w-[300px] h-[300px] border border-white rounded-full" />
-        <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] border border-[#4F8EF7] rounded-full" />
-      </div>
-
+    <div className="w-full min-h-screen flex flex-col items-center justify-center p-4 relative bg-[#0A0A0F] text-[var(--text-primary)]">
       {/* Screen badge */}
-      <div className="mb-6 flex items-center space-x-2 bg-[#13131A] border border-[#2A2A38] px-3.5 py-1.5 rounded-full z-10 shadow-lg">
-        <span className="w-1.5 h-1.5 bg-[#4F8EF7] rounded-full animate-pulse" />
-        <span className="font-mono text-[10px] tracking-wider text-gray-400 font-bold uppercase">
+      <div className="mb-6 flex items-center space-x-2 bg-[var(--surface)] border border-[var(--border-custom)] px-3.5 py-1.5 rounded-full z-10 shadow-lg">
+        <span className="w-1.5 h-1.5 bg-[#FF6B1A] rounded-full animate-pulse" />
+        <span className="font-mono text-[10px] tracking-widest text-[var(--text-secondary)] font-bold uppercase">
           Secure Sign-In · DeskGuard Portal
         </span>
       </div>
@@ -70,17 +64,19 @@ export default function LoginPage() {
       {/* Card */}
       <div
         id="login-card"
-        className="w-[90%] md:w-full max-w-[480px] bg-[#13131A] border border-[#2A2A38] rounded-[16px] overflow-hidden shadow-2xl relative z-10 p-10 space-y-8"
+        className="w-[90%] md:w-full max-w-[480px] bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] overflow-hidden shadow-2xl relative z-10 p-10 space-y-8"
       >
         {/* Logo */}
-        <div className="flex flex-col items-center justify-center">
-          <div className="w-14 h-14 bg-[#1C1C26] border border-[#2A2A38] rounded-[16px] flex items-center justify-center text-[#4F8EF7] relative">
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#22C55E] rounded-full animate-ping" />
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#22C55E] rounded-full" />
-            <GraduationCap className="w-7 h-7" />
+        <div className="flex flex-col items-center justify-center space-y-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-[var(--elevated)] border border-[var(--border-custom)] rounded-[10px] text-[#FF6B1A]">
+              <GraduationCap className="w-6 h-6" />
+            </div>
+            <h1 className="font-display font-bold text-[24px] text-[var(--text-primary)] leading-none tracking-tight">
+              DeskGuard
+            </h1>
           </div>
-          <h1 className="mt-4 font-display font-bold text-[28px] text-white tracking-tight text-center leading-none">DeskGuard</h1>
-          <p className="mt-2 font-sans text-[14px] text-[#6B7280] tracking-wide text-center">Library Portal</p>
+          <p className="font-sans text-[13px] text-[var(--text-secondary)] tracking-wide text-center">Library Portal</p>
         </div>
 
         <AnimatePresence mode="wait">
@@ -100,43 +96,35 @@ export default function LoginPage() {
             <motion.form key="form" onSubmit={handleSubmit} className="space-y-5">
               {/* Email */}
               <div className="space-y-1.5">
-                <label htmlFor="email-input-field" className="block font-mono text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                <label htmlFor="email-input-field" className="block font-mono text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                   Email Address
                 </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-gray-500">
-                    <Mail className="w-4 h-4" />
-                  </span>
-                  <input
-                    id="email-input-field"
-                    type="email"
-                    required
-                    placeholder="you@muj.manipal.edu"
-                    className="w-full h-12 pl-10 pr-4 font-mono text-[13px] bg-[#0A0A0F] border border-[#2A2A38] rounded-[12px] text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-[#4F8EF7] focus:border-[#4F8EF7] transition-all"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                <p className="font-mono text-[10px] text-[#6B7280] mt-1">
+                <input
+                  id="email-input-field"
+                  type="email"
+                  required
+                  placeholder="you@muj.manipal.edu"
+                  className="w-full h-12 px-4 font-mono text-[13px] bg-[var(--bg-dark)] border border-[var(--border-custom)] rounded-[12px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <span className="font-sans text-[11px] text-[var(--text-muted)] mt-1.5 block">
                   @muj.manipal.edu → Student &nbsp;|&nbsp; @jaipur.manipal.edu → Faculty
-                </p>
+                </span>
               </div>
 
               {/* Password */}
               <div className="space-y-1.5">
-                <label htmlFor="pw-input-field" className="block font-mono text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                <label htmlFor="pw-input-field" className="block font-mono text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest">
                   Password
                 </label>
                 <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-gray-500">
-                    <Lock className="w-4 h-4" />
-                  </span>
                   <input
                     id="pw-input-field"
                     type={showPassword ? 'text' : 'password'}
                     required
                     placeholder="••••••••"
-                    className="w-full h-12 pl-10 pr-10 font-mono text-[13px] bg-[#0A0A0F] border border-[#2A2A38] rounded-[12px] text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-[#4F8EF7] focus:border-[#4F8EF7] transition-all"
+                    className="w-full h-12 pl-4 pr-10 font-mono text-[13px] bg-[var(--bg-dark)] border border-[var(--border-custom)] rounded-[12px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
@@ -157,7 +145,7 @@ export default function LoginPage() {
                 type="submit"
                 id="btn-signin-full-width"
                 disabled={isSubmitting}
-                className="w-full h-12 bg-[#4F8EF7] hover:bg-[#4F8EF7]/90 text-white font-display font-medium rounded-[12px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-[#4F8EF7]/15 disabled:opacity-50"
+                className="w-full h-12 bg-[#FF6B1A] hover:bg-[#FF6B1A]/90 text-white font-display font-medium rounded-[12px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-[#FF6B1A]/15 disabled:opacity-50"
               >
                 {isSubmitting
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Establishing Secure Handshake...</>
@@ -169,9 +157,9 @@ export default function LoginPage() {
         </AnimatePresence>
 
         <div className="text-center pt-2">
-          <p id="deskguard-trouble-signing-guide" className="font-sans text-xs text-[#6B7280] leading-relaxed">
+          <p id="deskguard-trouble-signing-guide" className="font-sans text-xs text-[var(--text-muted)] leading-relaxed">
             Trouble signing in?{' '}
-            <span className="text-[#4F8EF7] font-semibold cursor-pointer hover:underline">
+            <span className="text-[#FF6B1A] font-semibold cursor-pointer hover:underline">
               Contact your librarian
             </span>
           </p>

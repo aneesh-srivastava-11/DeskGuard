@@ -4,7 +4,6 @@ import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, AlertTriangle, Loader2, QrCode, GraduationCap } from 'lucide-react'
-import { verifyQrToken } from '@/lib/crypto-utils'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/components/providers/auth-provider'
 
@@ -41,14 +40,12 @@ function QrScanContent() {
   }, [user])
 
   useEffect(() => {
-    const verify = async () => {
-      const valid = await verifyQrToken(deskId, token, iat)
-      setTokenValid(valid)
-      if (!valid) setError('QR code is expired or invalid. Please scan a new code from the librarian.')
+    if (deskId && token) {
+      setTokenValid(true)
+    } else {
+      setError('Missing QR parameters. Please scan a valid desk QR code.')
     }
-    if (deskId && token && iat) verify()
-    else setError('Missing QR parameters. Please scan a valid desk QR code.')
-  }, [deskId, token, iat])
+  }, [deskId, token])
 
   // Countdown timer
   useEffect(() => {
@@ -66,22 +63,42 @@ function QrScanContent() {
     if (!tokenValid) { setError('Token verification failed. Scan a fresh QR code.'); return }
 
     setIsChecking(true)
-    const { data, error: rpcError } = await supabase.rpc('checkin_desk', {
-      p_desk_id: deskId,
-      p_student_id: user.id,
-    })
+    try {
+      const response = await fetch('/api/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deskId, token })
+      })
+      const result = await response.json()
 
-    if (rpcError || data?.error) {
-      const msg = data?.error === 'desk_not_free' ? 'This desk is no longer available.'
-        : data?.error === 'already_checked_in' ? 'You already have an active session at another desk.'
-        : rpcError?.message ?? 'Check-in failed. Try again.'
-      setError(msg)
+      if (!response.ok || result.error) {
+        let msg = 'Check-in failed. Try again.'
+        if (result.error === 'unauthorized') {
+          router.push('/login')
+          return
+        } else if (result.error === 'invalid_token') {
+          msg = 'Invalid QR code'
+        } else if (result.error === 'token_expired') {
+          msg = 'QR expired'
+        } else if (result.error === 'desk_not_free') {
+          msg = 'Desk just taken'
+        } else if (result.error === 'already_checked_in') {
+          msg = 'Already have session'
+        } else if (result.error) {
+          msg = result.error
+        }
+        setError(msg)
+        setIsChecking(false)
+        return
+      }
+
+      setCheckInSuccess(true)
+      setTimeout(() => router.push('/dashboard/session'), 2500)
+    } catch (err: any) {
+      console.error('[DeskGuard]', err.message)
+      setError('Check-in failed. Try again.')
       setIsChecking(false)
-      return
     }
-
-    setCheckInSuccess(true)
-    setTimeout(() => router.push('/dashboard/session'), 2500)
   }
 
   return (

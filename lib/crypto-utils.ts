@@ -1,60 +1,52 @@
-/**
- * Client-side HMAC-SHA256 helpers using the Web Crypto API.
- * No Node.js crypto — works in Next.js client components and edge runtime.
- */
+import crypto from 'crypto'
 
-const QR_SECRET = process.env.NEXT_PUBLIC_APP_URL
-  ? 'deskguard-qr-secret-minimum-32-chars-here' // fallback; server route uses process.env.QR_SECRET
-  : 'deskguard-qr-secret-minimum-32-chars-here'
-
-async function importKey(secret: string, usage: 'sign' | 'verify') {
-  return crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    [usage]
-  )
-}
-
-// ─── Sign ──────────────────────────────────────────────────────────────────
-export async function signQrPayload(deskId: string): Promise<{ token: string; iat: number }> {
+// ─── Sign / Generate ─────────────────────────────────────────────────────────
+export async function generateQRToken(deskId: string): Promise<string> {
+  const secret = process.env.QR_SECRET
+  if (!secret) {
+    throw new Error('QR_SECRET is not defined')
+  }
   const iat = Math.floor(Date.now() / 1000)
   const payload = JSON.stringify({ deskId, iat })
-  const key = await importKey(QR_SECRET, 'sign')
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))
-  const token = btoa(String.fromCharCode(...new Uint8Array(sig)))
-  return { token, iat }
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url')
+  return Buffer.from(payload).toString('base64url') + '.' + signature
 }
 
-// ─── Verify ────────────────────────────────────────────────────────────────
-export async function verifyQrToken(
-  deskId: string,
-  token: string,
-  iat: number,
-  secret?: string
-): Promise<boolean> {
-  // Reject tokens older than 60 seconds
-  if (Date.now() / 1000 - iat > 60) return false
-
-  const payload = JSON.stringify({ deskId, iat })
-  const key = await importKey(secret ?? QR_SECRET, 'verify')
-
-  let sigBytes: Uint8Array
+// ─── Verify ──────────────────────────────────────────────────────────────────
+export async function verifyQRToken(token: string): Promise<{ deskId: string; iat: number } | null> {
   try {
-    sigBytes = Uint8Array.from(atob(token), (c) => c.charCodeAt(0))
-  } catch {
-    return false
+    const secret = process.env.QR_SECRET
+    if (!secret) {
+      throw new Error('QR_SECRET is not defined')
+    }
+    const parts = token.split('.')
+    if (parts.length !== 2) return null
+    const [payloadB64, signature] = parts
+    const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8')
+    const payload = JSON.parse(payloadStr)
+    
+    // verify signature
+    const expectedSignature = crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('base64url')
+    if (signature !== expectedSignature) return null
+    
+    return payload
+  } catch (err) {
+    return null
   }
-
-  return crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(payload))
 }
 
 // ─── QR Image ─────────────────────────────────────────────────────────────
 export async function generateQrDataUrl(deskId: string): Promise<string> {
   const QRCode = (await import('qrcode')).default
-  const { token, iat } = await signQrPayload(deskId)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const url = `${appUrl}/scan?desk=${deskId}&token=${encodeURIComponent(token)}&iat=${iat}`
+  const token = await generateQRToken(deskId)
+  
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV !== 'production' ? 'http://localhost:3000' : undefined)
+  if (!baseUrl) {
+    throw new Error(
+      'NEXT_PUBLIC_APP_URL must be set in production'
+    )
+  }
+  
+  const url = `${baseUrl}/scan?desk=${deskId}&token=${encodeURIComponent(token)}`
   return QRCode.toDataURL(url, { width: 300, margin: 2 })
 }

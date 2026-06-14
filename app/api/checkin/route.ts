@@ -1,32 +1,87 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyQRToken } from '@/lib/crypto-utils'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { createClient } from '@supabase/supabase-js'
+import { cookies } from 'next/headers'
 
-/**
- * Server-side QR token verification endpoint.
- * POST /api/checkin { deskId, token, iat }
- * Uses process.env.QR_SECRET (server-only — never exposed to client).
- */
 export async function POST(req: NextRequest) {
-  const { deskId, token, iat } = await req.json()
+  const cookieStore = await cookies()
+  const token = cookieStore.get('sb-access-token')?.value
 
-  const secret = process.env.QR_SECRET ?? ''
-  if (!secret) return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 })
+  if (!token) {
+    return NextResponse.json(
+      { error: 'unauthorized' }, { status: 401 }
+    )
+  }
 
-  // Reject tokens older than 60 seconds
-  const now = Math.floor(Date.now() / 1000)
-  if (now - iat > 60) return NextResponse.json({ error: 'token_expired' }, { status: 401 })
-
-  // Verify HMAC
-  const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } }
+    }
   )
-  const payload = JSON.stringify({ deskId, iat })
-  let sigBytes: Uint8Array
-  try { sigBytes = Uint8Array.from(atob(token), (c) => c.charCodeAt(0)) }
-  catch { return NextResponse.json({ error: 'invalid_token' }, { status: 401 }) }
 
-  const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(payload))
-  if (!valid) return NextResponse.json({ error: 'invalid_token' }, { status: 401 })
+  const { data: { user } } = await supabase.auth.getUser(token)
+  if (!user) {
+    return NextResponse.json(
+      { error: 'unauthorized' }, { status: 401 }
+    )
+  }
 
-  return NextResponse.json({ ok: true })
+  const { deskId, token: qrToken } = await req.json()
+  if (!deskId || !qrToken) {
+    return NextResponse.json(
+      { error: 'missing_params' }, { status: 400 }
+    )
+  }
+
+  const payload = await verifyQRToken(qrToken)
+  if (!payload || payload.deskId !== deskId) {
+    return NextResponse.json(
+      { error: 'invalid_token' }, { status: 400 }
+    )
+  }
+
+  if (Date.now() / 1000 - payload.iat > 60) {
+    return NextResponse.json(
+      { error: 'token_expired' }, { status: 400 }
+    )
+  }
+
+  const { data: student } = await supabaseAdmin
+    .from('students')
+    .select('id')
+    .eq('id', user.id)
+    .single()
+
+  if (!student) {
+    return NextResponse.json(
+      { error: 'student_not_found' }, { status: 404 }
+    )
+  }
+
+  const { data, error } = await supabaseAdmin
+    .rpc('checkin_desk', {
+      p_desk_id: deskId,
+      p_student_id: student.id
+    })
+
+  if (error) {
+    return NextResponse.json(
+      { error: error.message }, { status: 500 }
+    )
+  }
+
+  if (data?.error) {
+    return NextResponse.json(
+      { error: data.error }, { status: 409 }
+    )
+  }
+
+  return NextResponse.json({ 
+    success: true, 
+    session: data?.session 
+  })
 }

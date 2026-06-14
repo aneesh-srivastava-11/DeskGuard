@@ -5,7 +5,6 @@ import { Bell, QrCode, RefreshCw, Zap, X } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
 import { supabase } from '@/lib/supabase'
-import { generateQrDataUrl } from '@/lib/crypto-utils'
 import { INITIAL_DESKS } from '@/lib/desk-data'
 import type { Desk } from '@/lib/types'
 
@@ -16,21 +15,38 @@ export default function LibrarianDashboardPage() {
   const [desks, setDesks]     = useState<Desk[]>(INITIAL_DESKS)
   const [qrModal, setQrModal] = useState<{ deskId: string; dataUrl: string } | null>(null)
   const [loadingQr, setLoadingQr] = useState(false)
+  
+  const [pendingCount, setPendingCount] = useState(0)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
 
   const abandonedDesks = desks.filter((d) => d.status === 'abandoned')
 
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase.from('desks').select('*')
-      if (data?.length) {
-        setDesks(data.map((d: Record<string, unknown>) => ({
-          id: d.id as string, row: d.row_label as string, seat: d.seat_number as number,
-          status: (d.status as string).toLowerCase() as Desk['status'],
-          occupiedSince: null, durationText: null, occupantId: null, occupantName: null,
-          hasPower: d.has_power as boolean, isWindow: d.is_window as boolean,
-        })))
-      }
+  const load = async () => {
+    // 1. Load desks
+    const { data } = await supabase.from('desks').select('*')
+    if (data?.length) {
+      setDesks(data.map((d: Record<string, unknown>) => ({
+        id: d.id as string, row: d.row_label as string, seat: d.seat_number as number,
+        status: (d.status as string).toLowerCase() as Desk['status'],
+        occupiedSince: null, durationText: null, occupantId: null, occupantName: null,
+        hasPower: d.has_power as boolean, isWindow: d.is_window as boolean,
+      })))
     }
+
+    // 2. Load pending issue requests count
+    try {
+      const { count } = await supabase
+        .from('book_issues')
+        .select('*', { count: 'exact', head: true })
+        .eq('approved', false)
+        .is('returned_at', null)
+      setPendingCount(count || 0)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  useEffect(() => {
     load()
     const interval = setInterval(load, 30000)
     return () => clearInterval(interval)
@@ -43,20 +59,54 @@ export default function LibrarianDashboardPage() {
     addToast(`Desk ${deskId} reset — returned to free pool.`, 'success')
   }
 
+  const handleSetMaintenance = async (deskId: string, enable: boolean) => {
+    const status = enable ? 'MAINTENANCE' : 'FREE'
+    if (enable) {
+      await supabase.from('sessions').update({ status: 'RELEASED', released_at: new Date().toISOString() }).eq('desk_id', deskId).in('status', ['ACTIVE','AWAY','ABANDONED'])
+    }
+    await supabase.from('desks').update({ status }).eq('id', deskId)
+    setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: enable ? 'maintenance' : 'free', occupantId: null } : d))
+    addToast(`Desk ${deskId} status updated to ${enable ? 'Maintenance' : 'Normal'}.`, 'success')
+  }
+
   const handleViewQr = async (deskId: string) => {
     setLoadingQr(true)
-    const dataUrl = await generateQrDataUrl(deskId)
-    setQrModal({ deskId, dataUrl })
-    setLoadingQr(false)
+    try {
+      const res = await fetch(`/api/qr?deskId=${encodeURIComponent(deskId)}`)
+      const result = await res.json()
+      if (result.error) {
+        console.error('[DeskGuard]', result.error)
+        addToast(result.error, 'error')
+      } else {
+        setQrModal({ deskId, dataUrl: result.dataUrl })
+      }
+    } catch (err: any) {
+      console.error('[DeskGuard]', err.message)
+      addToast('Failed to load QR code', 'error')
+    } finally {
+      setLoadingQr(false)
+    }
   }
 
   const handleRegenerateQr = async () => {
     if (!qrModal) return
     setLoadingQr(true)
-    const dataUrl = await generateQrDataUrl(qrModal.deskId)
-    setQrModal({ ...qrModal, dataUrl })
-    setLoadingQr(false)
-    addToast('QR regenerated — old code expired.', 'info')
+    try {
+      const res = await fetch(`/api/qr?deskId=${encodeURIComponent(qrModal.deskId)}`)
+      const result = await res.json()
+      if (result.error) {
+        console.error('[DeskGuard]', result.error)
+        addToast(result.error, 'error')
+      } else {
+        setQrModal({ ...qrModal, dataUrl: result.dataUrl })
+        addToast('QR regenerated — old code expired.', 'info')
+      }
+    } catch (err: any) {
+      console.error('[DeskGuard]', err.message)
+      addToast('Failed to regenerate QR code', 'error')
+    } finally {
+      setLoadingQr(false)
+    }
   }
 
   const computedFree      = desks.filter((d) => d.status === 'free').length
@@ -64,9 +114,26 @@ export default function LibrarianDashboardPage() {
   const computedAway      = desks.filter((d) => d.status === 'away').length
   const computedAbandoned = desks.filter((d) => d.status === 'abandoned').length
 
+  // Build notifications array
+  const notifications: { type: 'abandoned' | 'request'; message: string; id: string }[] = []
+  abandonedDesks.forEach(d => {
+    notifications.push({
+      type: 'abandoned',
+      message: `Desk ${d.id} has been marked abandoned.`,
+      id: d.id
+    })
+  })
+  if (pendingCount > 0) {
+    notifications.push({
+      type: 'request',
+      message: `${pendingCount} book issue request${pendingCount > 1 ? 's' : ''} pending approval.`,
+      id: 'book-requests'
+    })
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between border-b border-[var(--border-custom)] h-[52px] px-6">
+      <div className="flex items-center justify-between border-b border-[var(--border-custom)] h-[52px] px-6 relative z-10">
         <div className="flex items-center space-x-3">
           <h2 className="font-display font-bold text-[22px] text-[var(--text-primary)] tracking-tight">Librarian Portal</h2>
           <div className="hidden sm:flex items-center space-x-1.5 bg-[#FF6B1A]/10 border border-[#FF6B1A]/30 px-2.5 py-1 rounded-full">
@@ -74,11 +141,60 @@ export default function LibrarianDashboardPage() {
             <span className="font-mono text-[11px] font-bold text-[#FF6B1A]">Admin</span>
           </div>
         </div>
-        <button onClick={() => addToast(`${abandonedDesks.length} abandoned desk(s) detected: ${abandonedDesks.map(d=>d.id).join(', ')}`, 'warning')}
-          className="p-2 bg-[var(--surface)] border border-[var(--border-custom)] rounded-full hover:bg-[var(--elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all relative cursor-pointer">
-          {abandonedDesks.length > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[#DC2626] rounded-full" />}
-          <Bell className="w-4 h-4" />
-        </button>
+        
+        <div className="relative">
+          <button onClick={() => setNotificationsOpen(!notificationsOpen)}
+            className="p-2 bg-[var(--surface)] border border-[var(--border-custom)] rounded-full hover:bg-[var(--elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all relative cursor-pointer">
+            {notifications.length > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[#DC2626] rounded-full" />}
+            <Bell className="w-4 h-4" />
+          </button>
+
+          {notificationsOpen && (
+            <div className="absolute right-0 mt-2 w-80 bg-[var(--surface)] border border-[var(--border-custom)] rounded-[12px] shadow-xl z-50 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-display font-bold text-xs text-[var(--text-primary)]">Notifications</h4>
+                {notifications.length > 0 && (
+                  <span className="text-[9px] font-mono bg-[#EF4444]/10 text-[#EF4444] px-1.5 py-0.5 rounded-full font-bold">
+                    {notifications.length} New
+                  </span>
+                )}
+              </div>
+              <div className="divide-y divide-[var(--border-custom)]/50 max-h-60 overflow-y-auto pr-1">
+                {notifications.length === 0 ? (
+                  <p className="text-center text-[11px] font-mono text-[var(--text-muted)] py-4">No new notifications</p>
+                ) : (
+                  notifications.map((notif, index) => (
+                    <div key={index} className="py-2.5 flex items-start gap-2.5 text-[11px] leading-relaxed">
+                      <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${notif.type === 'abandoned' ? 'bg-[#DC2626]' : 'bg-[#FF6B1A]'}`} />
+                      <div className="flex-1">
+                        <p className="text-[var(--text-primary)] font-medium">{notif.message}</p>
+                        {notif.type === 'abandoned' ? (
+                          <button
+                            onClick={() => {
+                              handleReset(notif.id)
+                              setNotificationsOpen(false)
+                            }}
+                            className="mt-1 text-[9px] font-bold text-[#EF4444] hover:underline cursor-pointer"
+                          >
+                            Reset Desk
+                          </button>
+                        ) : (
+                          <a
+                            href="/dashboard/book-management"
+                            onClick={() => setNotificationsOpen(false)}
+                            className="mt-1 block text-[9px] font-bold text-[#FF6B1A] hover:underline cursor-pointer"
+                          >
+                            Manage Requests
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Abandoned alert banner */}
@@ -118,7 +234,7 @@ export default function LibrarianDashboardPage() {
       <div className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] overflow-hidden">
         <div className="p-5 border-b border-[var(--border-custom)] flex items-center justify-between">
           <h3 className="font-display font-bold text-sm text-[var(--text-primary)]">All Desks Overview</h3>
-          <button className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1 hover:text-[var(--text-primary)] cursor-pointer">
+          <button onClick={load} className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1 hover:text-[var(--text-primary)] cursor-pointer">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </button>
         </div>
@@ -159,6 +275,17 @@ export default function LibrarianDashboardPage() {
                         <button onClick={() => handleReset(desk.id)}
                           className="px-2.5 py-1 text-[10px] font-bold text-[#EF4444] border border-[#EF4444]/30 rounded-[6px] hover:bg-[#EF4444]/10 cursor-pointer">
                           Reset
+                        </button>
+                      )}
+                      {desk.status === 'maintenance' ? (
+                        <button onClick={() => handleSetMaintenance(desk.id, false)}
+                          className="px-2.5 py-1 text-[10px] font-bold text-[#22C55E] border border-[#22C55E]/30 rounded-[6px] hover:bg-[#22C55E]/10 cursor-pointer">
+                          Make Normal
+                        </button>
+                      ) : (
+                        <button onClick={() => handleSetMaintenance(desk.id, true)}
+                          className="px-2.5 py-1 text-[10px] font-bold text-[#6B7280] border border-[#6B7280]/30 rounded-[6px] hover:bg-[#6B7280]/10 cursor-pointer">
+                          Maintenance
                         </button>
                       )}
                     </td>

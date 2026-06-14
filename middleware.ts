@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const LIBRARIAN_ROUTES = ['/dashboard/admin', '/dashboard/book-management']
-const IS_CONFIGURED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -10,24 +9,34 @@ export async function middleware(request: NextRequest) {
   // /scan is fully public
   if (pathname.startsWith('/scan')) return NextResponse.next()
 
-  // If Supabase is not yet configured, bypass all auth guards (UI-only mode)
-  if (!IS_CONFIGURED) return NextResponse.next()
-
-  // Build a lightweight server-side Supabase client to check the session cookie
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
-  )
-
   const token = request.cookies.get('sb-access-token')?.value
   let isLoggedIn = false
-  let email = ''
+  let role = 'student'
 
   if (token) {
-    const { data: { user } } = await supabase.auth.getUser(token)
-    if (user) {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: `Bearer ${token}` } }
+      }
+    )
+
+    const { data: { user: authUser } } = await supabase.auth.getUser(token)
+    if (authUser) {
       isLoggedIn = true
-      email = user.email ?? ''
+      
+      // Fetch role from students table
+      const { data: student } = await supabase
+        .from('students')
+        .select('role')
+        .eq('id', authUser.id)
+        .single()
+      
+      if (student) {
+        role = student.role
+      }
     }
   }
 
@@ -44,8 +53,11 @@ export async function middleware(request: NextRequest) {
 
   // RBAC: librarian-only routes
   const isLibrarianRoute = LIBRARIAN_ROUTES.some((r) => pathname.startsWith(r))
-  if (isLibrarianRoute && isLoggedIn) {
-    if (!email.endsWith('@jaipur.manipal.edu')) {
+  if (isLibrarianRoute) {
+    if (!isLoggedIn) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+    if (role !== 'librarian') {
       // Student trying to access librarian area → redirect to dashboard
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }

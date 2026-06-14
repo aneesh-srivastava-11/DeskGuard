@@ -47,18 +47,31 @@ export default function LiveMapPage() {
     // Realtime subscription
     const channel = supabase
       .channel('desks-realtime')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'desks' }, (payload) => {
-        const updated = payload.new as Record<string, unknown>
-        setDesks((prev) => prev.map((d) =>
-          d.id === updated.id
-            ? { ...d, status: (updated.status as string).toLowerCase() as Desk['status'] }
-            : d
-        ))
-        setLogs((prev) => [`[REALTIME] Desk ${updated.id} updated → ${updated.status}`, ...prev])
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'desks'
+      }, (payload) => {
+        if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+          const updated = payload.new as Record<string, any>
+          setDesks((prev) => prev.map((d) =>
+            d.id === updated.id
+              ? {
+                  ...d,
+                  status: (updated.status as string).toLowerCase() as Desk['status'],
+                  hasPower: updated.has_power as boolean,
+                  isWindow: updated.is_window as boolean
+                }
+              : d
+          ))
+          setLogs((prev) => [`[REALTIME] Desk ${updated.id} updated → ${updated.status}`, ...prev])
+        }
       })
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   // Fetch active session for students
@@ -84,7 +97,20 @@ export default function LiveMapPage() {
     return () => clearInterval(t)
   }, [])
 
-  const selectedDesk = desks.find((d) => d.id === selectedDeskId) ?? desks[13]
+  const selectedDesk = desks.find((d) => d.id === selectedDeskId) ?? desks[0]
+
+  if (desks.length === 0) {
+    return (
+      <div className="flex-1 min-h-[60vh] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <RefreshCw className="w-8 h-8 text-[#FF6B1A] animate-spin" />
+          <p className="font-mono text-xs text-[var(--text-secondary)] uppercase tracking-widest">
+            Loading Live Map...
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const computedFree        = desks.filter((d) => d.status === 'free').length
   const computedOccupied    = desks.filter((d) => d.status === 'occupied').length
@@ -99,21 +125,65 @@ export default function LiveMapPage() {
   }
 
   const handleRelease = async (deskId: string) => {
-    setDesks((prev) => prev.map((d) => d.id === deskId
-      ? { ...d, status: 'free', occupiedSince: null, durationText: null, occupantId: null }
-      : d))
-    await supabase.from('desks').update({ status: 'FREE' }).eq('id', deskId)
-    setLogs((prev) => [`[RELEASE] Desk ${deskId} released.`, ...prev])
-    addToast(`Desk ${deskId} released successfully.`, 'success')
+    try {
+      const { data: session } = await supabase
+        .from('sessions')
+        .select('id')
+        .eq('desk_id', deskId)
+        .in('status', ['ACTIVE', 'AWAY'])
+        .maybeSingle()
+
+      if (session) {
+        const { error: sessionErr } = await supabase
+          .from('sessions')
+          .update({ status: 'RELEASED' })
+          .eq('id', session.id)
+        if (sessionErr) throw sessionErr
+      }
+
+      const { error: deskErr } = await supabase
+        .from('desks')
+        .update({ status: 'FREE' })
+        .eq('id', deskId)
+      if (deskErr) throw deskErr
+
+      setLogs((prev) => [`[RELEASE] Desk ${deskId} released.`, ...prev])
+      addToast(`Desk ${deskId} released successfully.`, 'success')
+    } catch (err: any) {
+      console.error(err)
+      addToast(`Release failed: ${err.message}`, 'error')
+    }
   }
 
   const handleSweep = async (deskId: string) => {
-    setDesks((prev) => prev.map((d) => d.id === deskId
-      ? { ...d, status: 'free', occupiedSince: null, durationText: null, occupantId: null }
-      : d))
-    await supabase.from('desks').update({ status: 'FREE' }).eq('id', deskId)
-    setLogs((prev) => [`[SWEEP] Abandoned flag on Desk ${deskId} cleared.`, ...prev])
-    addToast(`Desk ${deskId} swept — returned to free pool.`, 'success')
+    try {
+      const { data: session } = await supabase
+        .from('sessions')
+        .select('id')
+        .eq('desk_id', deskId)
+        .eq('status', 'ABANDONED')
+        .maybeSingle()
+
+      if (session) {
+        const { error: sessionErr } = await supabase
+          .from('sessions')
+          .update({ status: 'RELEASED' })
+          .eq('id', session.id)
+        if (sessionErr) throw sessionErr
+      }
+
+      const { error: deskErr } = await supabase
+        .from('desks')
+        .update({ status: 'FREE' })
+        .eq('id', deskId)
+      if (deskErr) throw deskErr
+
+      setLogs((prev) => [`[SWEEP] Abandoned flag on Desk ${deskId} cleared.`, ...prev])
+      addToast(`Desk ${deskId} swept — returned to free pool.`, 'success')
+    } catch (err: any) {
+      console.error(err)
+      addToast(`Sweep failed: ${err.message}`, 'error')
+    }
   }
 
   return (

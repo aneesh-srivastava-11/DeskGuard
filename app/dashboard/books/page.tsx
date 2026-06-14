@@ -14,11 +14,13 @@ export default function BooksPage() {
 
   const [books, setBooks]           = useState<BookType[]>(INITIAL_BOOKS)
   const [issuedBooks, setIssuedBooks] = useState<IssuedBook[]>(INITIAL_ISSUED_BOOKS)
+  const [pendingBookIds, setPendingBookIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [bookFilter, setBookFilter]   = useState<'all' | 'available' | 'issued' | 'overdue'>('all')
 
   useEffect(() => {
     const load = async () => {
+      // Load Catalog Books
       const { data } = await supabase.from('books').select('*')
       if (data?.length) {
         setBooks(data.map((b: Record<string, unknown>, i: number) => ({
@@ -26,16 +28,59 @@ export default function BooksPage() {
           title: b.title as string,
           author: b.author as string,
           isbn: b.isbn as string,
-          coverBg: INITIAL_BOOKS[i % INITIAL_BOOKS.length]?.coverBg ?? 'from-slate-800 to-neutral-900',
+          coverBg: [
+            'from-blue-900 to-indigo-950',
+            'from-slate-800 to-neutral-900',
+            'from-emerald-900 to-teal-950',
+            'from-red-900 to-rose-950',
+            'from-purple-900 to-fuchsia-950',
+            'from-amber-900 to-yellow-900'
+          ][i % 6] || 'from-slate-800 to-neutral-900',
           availableCopies: b.available_copies as number,
           totalCopies: b.total_copies as number,
           status: ((b.available_copies as number) === 0 ? 'issued' : (b.available_copies as number) === 1 ? 'limited' : 'available') as BookStatus,
           copies: (b.available_copies as number) === 0 ? '0 copies available' : (b.available_copies as number) === 1 ? '1 copy left' : 'Multiple copies',
         })))
       }
+
+      // Load user issues and pending requests
+      if (!user) return
+
+      // Supabase mode
+      try {
+        const { data: issues } = await supabase
+          .from('book_issues')
+          .select('id, issued_at, due_at, returned_at, approved, book_id, books(title, author)')
+          .eq('student_id', user.id)
+          .is('returned_at', null)
+
+        if (issues) {
+          const approved = issues.filter((x: any) => x.approved)
+          setIssuedBooks(approved.map((item: any) => {
+            const book = item.books as any
+            const isOverdue = new Date(item.due_at).getTime() < Date.now()
+            return {
+              id: item.id,
+              title: book?.title ?? 'Unknown Book',
+              author: book?.author ?? '—',
+              issueDate: new Date(item.issued_at || Date.now()).toLocaleDateString(),
+              dueDate: new Date(item.due_at).toLocaleDateString(),
+              status: isOverdue ? 'overdue' : 'on-time',
+              statusText: isOverdue ? 'Overdue' : 'Issued',
+            }
+          }))
+
+          const pendingIds = new Set<string>(
+            issues.filter((x: any) => !x.approved).map((x: any) => x.book_id)
+          )
+          setPendingBookIds(pendingIds)
+        }
+      } catch (err) {
+        console.error(err)
+      }
     }
     load()
-  }, [])
+  }, [user])
 
   const filteredBooks = books.filter((b) => {
     const query = searchQuery.toLowerCase()
@@ -47,11 +92,22 @@ export default function BooksPage() {
   const handleRequestIssue = async (book: BookType) => {
     if (!user) return
     if (book.status === 'issued') { addToast(`"${book.title}" has no available copies.`, 'error'); return }
-    const { error } = await supabase.from('book_issues').insert({ book_id: book.id, student_id: user.id })
-    if (error) { addToast(`Failed to request "${book.title}": ${error.message}`, 'error'); return }
-    await supabase.from('books').update({ available_copies: (book.availableCopies ?? 1) - 1 }).eq('id', book.id)
-    setBooks((prev) => prev.map((b) => b.id === book.id ? { ...b, availableCopies: (b.availableCopies ?? 1) - 1, status: ((b.availableCopies ?? 1) - 1 === 0 ? 'issued' : 'available') as BookStatus } : b))
-    addToast(`"${book.title}" issued successfully!`, 'success')
+
+    // Supabase mode
+    try {
+      const dueAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+      const { error } = await supabase.from('book_issues').insert({
+        book_id: book.id,
+        student_id: user.id,
+        approved: false,
+        due_at: dueAt
+      })
+      if (error) { addToast(`Failed to request "${book.title}": ${error.message}`, 'error'); return }
+      setPendingBookIds((prev) => new Set([...prev, book.id]))
+      addToast(`Issue request for "${book.title}" submitted.`, 'success')
+    } catch (err) {
+      addToast('Failed to request book.', 'error')
+    }
   }
 
   const COVER_COLORS: Record<string, string> = {
@@ -109,6 +165,7 @@ export default function BooksPage() {
       <div id="book-cards-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredBooks.map((book) => {
           const accent = COVER_COLORS[book.coverBg] ?? '#374151'
+          const isPending = pendingBookIds.has(book.id)
           return (
             <div key={book.id} className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[14px] overflow-hidden flex flex-col group hover:border-[#FF6B1A]/40 transition-all">
               {/* Cover */}
@@ -130,10 +187,10 @@ export default function BooksPage() {
                   </span>
                   <button
                     onClick={() => handleRequestIssue(book)}
-                    disabled={book.status === 'issued'}
+                    disabled={book.status === 'issued' || isPending}
                     className="px-3 py-1.5 text-[11px] font-sans font-semibold rounded-[8px] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-[#FF6B1A]/10 border border-[#FF6B1A]/30 text-[#FF6B1A] hover:bg-[#FF6B1A]/20"
                   >
-                    {book.status === 'issued' ? 'Unavailable' : 'Request Issue'}
+                    {book.status === 'issued' ? 'Unavailable' : isPending ? 'Pending Approval' : 'Request Issue'}
                   </button>
                 </div>
               </div>
@@ -149,32 +206,38 @@ export default function BooksPage() {
           <h3 className="font-display font-bold text-sm text-[var(--text-primary)]">My Issued Books</h3>
         </div>
         <div className="overflow-x-auto">
-          <table id="issued-books-table" className="w-full text-xs font-sans">
-            <thead>
-              <tr className="border-b border-[var(--border-custom)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] bg-[var(--bg-dark)]/50">
-                <th className="px-5 py-3 text-left font-semibold">Title</th>
-                <th className="px-5 py-3 text-left font-semibold hidden sm:table-cell">Author</th>
-                <th className="px-5 py-3 text-left font-semibold hidden md:table-cell">Issued</th>
-                <th className="px-5 py-3 text-left font-semibold">Due Date</th>
-                <th className="px-5 py-3 text-left font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {issuedBooks.map((book) => (
-                <tr key={book.id} className="border-b border-[var(--border-custom)]/50 hover:bg-[var(--elevated)]/40 transition-colors">
-                  <td className="px-5 py-4 text-[var(--text-primary)] font-medium">{book.title}</td>
-                  <td className="px-5 py-4 text-[var(--text-secondary)] hidden sm:table-cell">{book.author}</td>
-                  <td className="px-5 py-4 font-mono text-[var(--text-muted)] hidden md:table-cell">{book.issueDate}</td>
-                  <td className="px-5 py-4 font-mono text-[var(--text-primary)]">{book.dueDate}</td>
-                  <td className="px-5 py-4">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${book.status === 'overdue' ? 'bg-[#EF4444]/10 text-[#EF4444]' : 'bg-[#22C55E]/10 text-[#22C55E]'}`}>
-                      {book.statusText}
-                    </span>
-                  </td>
+          {issuedBooks.length === 0 ? (
+            <div className="p-8 text-center text-xs text-[var(--text-muted)] font-mono">
+              No books currently issued.
+            </div>
+          ) : (
+            <table id="issued-books-table" className="w-full text-xs font-sans">
+              <thead>
+                <tr className="border-b border-[var(--border-custom)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] bg-[var(--bg-dark)]/50">
+                  <th className="px-5 py-3 text-left font-semibold">Title</th>
+                  <th className="px-5 py-3 text-left font-semibold hidden sm:table-cell">Author</th>
+                  <th className="px-5 py-3 text-left font-semibold hidden md:table-cell">Issued</th>
+                  <th className="px-5 py-3 text-left font-semibold">Due Date</th>
+                  <th className="px-5 py-3 text-left font-semibold">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {issuedBooks.map((book) => (
+                  <tr key={book.id} className="border-b border-[var(--border-custom)]/50 hover:bg-[var(--elevated)]/40 transition-colors">
+                    <td className="px-5 py-4 text-[var(--text-primary)] font-medium">{book.title}</td>
+                    <td className="px-5 py-4 text-[var(--text-secondary)] hidden sm:table-cell">{book.author}</td>
+                    <td className="px-5 py-4 font-mono text-[var(--text-muted)] hidden md:table-cell">{book.issueDate}</td>
+                    <td className="px-5 py-4 font-mono text-[var(--text-primary)]">{book.dueDate}</td>
+                    <td className="px-5 py-4">
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${book.status === 'overdue' ? 'bg-[#EF4444]/10 text-[#EF4444]' : 'bg-[#22C55E]/10 text-[#22C55E]'}`}>
+                        {book.statusText}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

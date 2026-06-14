@@ -1,6 +1,0 @@
-{
-  "name": "DeskGuard Library Portal",
-  "description": "A high-fidelity university library seat booking portal featuring secure sign-in, real-time desk tracking, and reservations.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
