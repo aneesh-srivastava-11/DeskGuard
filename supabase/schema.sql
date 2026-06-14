@@ -318,6 +318,11 @@ create policy "students can read own sessions"
   on sessions for select
   using (auth.uid() = student_id);
 
+create policy "students can update own sessions"
+  on sessions for update
+  using (auth.uid() = student_id)
+  with check (auth.uid() = student_id);
+
 create policy "service role can write sessions"
   on sessions for all
   using (auth.role() = 'service_role');

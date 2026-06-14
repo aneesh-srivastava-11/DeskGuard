@@ -125,46 +125,85 @@ export default function SessionPage() {
   }, [sessionData, awayModeActive, awayLimitMinutes])
 
   const handleMarkAway = async () => {
-    if (sessionData && deskData) {
-      const nowStr = new Date().toISOString()
-      await supabase.from('sessions').update({ status: 'AWAY', away_started_at: nowStr }).eq('id', sessionData.id)
-      await supabase.from('desks').update({ status: 'AWAY' }).eq('id', deskData.id)
-      setAwayModeActive(true)
-      setSessionData((prev: any) => ({ ...prev, status: 'AWAY', away_started_at: nowStr }))
-      addToast(`Desk ${deskData.id} marked Away. ${awayLimitMinutes}-minute cap started.`, 'warning')
+    if (sessionData && deskData && user) {
+      try {
+        const { data, error } = await supabase.rpc('mark_away', {
+          p_session_id: sessionData.id,
+          p_student_id: user.id
+        })
+        if (error) throw error
+        if (data?.error) throw new Error(data.error)
+
+        const nowStr = new Date().toISOString()
+        setAwayModeActive(true)
+        setSessionData((prev: any) => ({ ...prev, status: 'AWAY', away_started_at: nowStr }))
+        addToast(`Desk ${deskData.id} marked Away. ${awayLimitMinutes}-minute cap started.`, 'warning')
+      } catch (err: any) {
+        console.error(err)
+        addToast(`Failed to mark away: ${err.message || err}`, 'error')
+      }
     }
   }
 
   const handleReturnFromAway = async () => {
-    if (sessionData && deskData) {
-      await supabase.from('sessions').update({ status: 'ACTIVE', away_started_at: null }).eq('id', sessionData.id)
-      await supabase.from('desks').update({ status: 'OCCUPIED' }).eq('id', deskData.id)
-      setAwayModeActive(false)
-      setPresenceConfirmed(true)
-      setPresenceAlertActive(false)
-      setSessionData((prev: any) => ({ ...prev, status: 'ACTIVE', away_started_at: null }))
-      addToast('Welcome back! Status restored to ACTIVE.', 'success')
+    if (sessionData && deskData && user) {
+      try {
+        const { data, error } = await supabase.rpc('mark_back', {
+          p_session_id: sessionData.id,
+          p_student_id: user.id
+        })
+        if (error) throw error
+        if (data?.error) throw new Error(data.error)
+
+        setAwayModeActive(false)
+        setPresenceConfirmed(true)
+        setPresenceAlertActive(false)
+        setSessionData((prev: any) => ({ ...prev, status: 'ACTIVE', away_started_at: null }))
+        addToast('Welcome back! Status restored to ACTIVE.', 'success')
+      } catch (err: any) {
+        console.error(err)
+        addToast(`Failed to return from away: ${err.message || err}`, 'error')
+      }
     }
   }
 
   const handleConfirmPresence = async () => {
-    setPresenceConfirmed(true)
-    setPresenceAlertActive(false)
     if (sessionData) {
-      await supabase.from('sessions').update({ last_confirmed_at: new Date().toISOString() }).eq('id', sessionData.id)
+      try {
+        const { error } = await supabase
+          .from('sessions')
+          .update({ last_confirmed_at: new Date().toISOString() })
+          .eq('id', sessionData.id)
+        if (error) throw error
+
+        setPresenceConfirmed(true)
+        setPresenceAlertActive(false)
+        addToast('Presence verified. Idle-sweep warnings cleared.', 'success')
+      } catch (err: any) {
+        console.error(err)
+        addToast('Presence confirmation failed.', 'error')
+      }
     }
-    addToast('Presence verified. Idle-sweep warnings cleared.', 'success')
   }
 
   const handleRelease = async () => {
-    if (!deskData || !sessionData) return
+    if (!deskData || !sessionData || !user) return
     if (!confirm('Release Desk ' + deskData.id + '? This is irreversible.')) return
     
-    await supabase.from('sessions').update({ status: 'RELEASED' }).eq('id', sessionData.id)
-    await supabase.from('desks').update({ status: 'FREE' }).eq('id', deskData.id)
-    
-    addToast(`Desk ${deskData.id} released. Now vacant.`, 'info')
-    router.push('/dashboard')
+    try {
+      const { data, error } = await supabase.rpc('release_desk', {
+        p_session_id: sessionData.id,
+        p_student_id: user.id
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+
+      addToast(`Desk ${deskData.id} released. Now vacant.`, 'info')
+      router.push('/dashboard')
+    } catch (err: any) {
+      console.error(err)
+      addToast(`Release failed: ${err.message || err}`, 'error')
+    }
   }
 
   if (loading || !sessionData || !deskData) {

@@ -191,24 +191,26 @@ export default function LiveMapPage() {
     try {
       const { data: session } = await supabase
         .from('sessions')
-        .select('id')
+        .select('id, student_id')
         .eq('desk_id', deskId)
         .in('status', ['ACTIVE', 'AWAY'])
         .maybeSingle()
 
       if (session) {
-        const { error: sessionErr } = await supabase
-          .from('sessions')
-          .update({ status: 'RELEASED' })
-          .eq('id', session.id)
-        if (sessionErr) throw sessionErr
+        const { data, error: releaseErr } = await supabase.rpc('release_desk', {
+          p_session_id: session.id,
+          p_student_id: session.student_id
+        })
+        if (releaseErr) throw releaseErr
+        if (data?.error) throw new Error(data.error)
+      } else {
+        // Fallback for librarians directly updating
+        const { error: deskErr } = await supabase
+          .from('desks')
+          .update({ status: 'FREE' })
+          .eq('id', deskId)
+        if (deskErr) throw deskErr
       }
-
-      const { error: deskErr } = await supabase
-        .from('desks')
-        .update({ status: 'FREE' })
-        .eq('id', deskId)
-      if (deskErr) throw deskErr
 
       setLogs((prev) => [`[RELEASE] Desk ${deskId} released.`, ...prev])
       addToast(`Desk ${deskId} released successfully.`, 'success')
