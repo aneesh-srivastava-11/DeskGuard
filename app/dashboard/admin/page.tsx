@@ -86,8 +86,21 @@ export default function LibrarianDashboardPage() {
 
   useEffect(() => {
     load()
+    
+    // Subscribe to desks, sessions, and book_issues changes to refresh map and counts in realtime
+    const channel = supabase
+      .channel('admin-dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'desks' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_issues' }, () => { load() })
+      .subscribe()
+
     const interval = setInterval(load, 30000)
-    return () => clearInterval(interval)
+    
+    return () => {
+      clearInterval(interval)
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   const handleReset = async (deskId: string) => {

@@ -74,8 +74,10 @@ insert into settings (key, value) values
 ('max_books_per_student', '2')
 on conflict (key) do nothing;
 
--- Enable Realtime for desks
+-- Enable Realtime for desks, sessions, and book_issues
 alter publication supabase_realtime add table desks;
+alter publication supabase_realtime add table sessions;
+alter publication supabase_realtime add table book_issues;
 
 -- Functions
 

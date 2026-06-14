@@ -83,6 +83,16 @@ export default function BookManagementPage() {
 
   useEffect(() => {
     loadData()
+
+    // Subscribe to book_issues table changes to update lists in realtime
+    const channel = supabase
+      .channel('book-issues-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_issues' }, () => { loadData() })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   const handleApproveRequest = async (req: PendingRequest) => {
