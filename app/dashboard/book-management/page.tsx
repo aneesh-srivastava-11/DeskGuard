@@ -29,12 +29,14 @@ export default function BookManagementPage() {
     setLoading(true)
     try {
       // 1. Fetch Overdue Books
-      const { data: overdue } = await supabase
+      const { data: overdue, error: overdueError } = await supabase
         .from('book_issues')
         .select('id, due_at, books(title, isbn), students(reg_no)')
         .is('returned_at', null)
         .eq('approved', true)
         .lt('due_at', new Date().toISOString())
+
+      if (overdueError) throw overdueError
 
       if (overdue) {
         setOverdueBooks(overdue.map((row: any) => {
@@ -53,11 +55,13 @@ export default function BookManagementPage() {
       }
 
       // 2. Fetch Pending requests
-      const { data: pending } = await supabase
+      const { data: pending, error: pendingError } = await supabase
         .from('book_issues')
         .select('id, created_at, book_id, student_id, books(title, isbn), students(reg_no)')
         .eq('approved', false)
         .is('returned_at', null)
+
+      if (pendingError) throw pendingError
 
       if (pending) {
         setPendingRequests(pending.map((row: any) => {
@@ -70,12 +74,13 @@ export default function BookManagementPage() {
             bookIsbn: book?.isbn ?? '—',
             studentId: row.student_id,
             studentReg: student?.reg_no ?? '—',
-            requestedAt: new Date(row.created_at).toLocaleString()
+            requestedAt: new Date(row.created_at || Date.now()).toLocaleString()
           }
         }))
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e)
+      addToast(e.message || 'Failed to load library data.', 'error')
     } finally {
       setLoading(false)
     }

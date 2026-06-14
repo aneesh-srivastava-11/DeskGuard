@@ -56,7 +56,8 @@ create table if not exists book_issues (
   issued_at timestamptz,
   due_at timestamptz 
     default now() + interval '14 days',
-  returned_at timestamptz
+  returned_at timestamptz,
+  created_at timestamptz default now()
 );
 
 create table if not exists settings (
