@@ -2,11 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion, AnimatePresence } from 'motion/react'
 import { AlertTriangle, CheckCircle2, RefreshCw, QrCode } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
-import { supabase } from '@/lib/supabase'
 
 function formatElapsedTime(totalSecs: number) {
   const hrs  = Math.floor(totalSecs / 3600)
@@ -22,11 +20,10 @@ export default function SessionPage() {
 
   const [loading, setLoading] = useState(true)
   const [sessionData, setSessionData] = useState<any>(null)
-  const [deskData, setDeskData] = useState<any>(null)
   
-  // Settings
-  const [sessionLimitHours, setSessionLimitHours] = useState(3)
-  const [awayLimitMinutes, setAwayLimitMinutes] = useState(30)
+  // Settings constants
+  const sessionLimitHours = 3
+  const awayLimitMinutes = 30
 
   // Timer states
   const [timerSeconds, setTimerSeconds]       = useState(0)
@@ -34,68 +31,37 @@ export default function SessionPage() {
   const [awaySecondsLeft, setAwaySecondsLeft] = useState(0)
 
   // Presence / away states
-  const [presenceAlertActive, setPresenceAlertActive] = useState(true)
+  const [presenceAlertActive, setPresenceAlertActive] = useState(false)
   const [presenceConfirmed, setPresenceConfirmed]     = useState(false)
   const [awayModeActive, setAwayModeActive]           = useState(false)
 
-  // Fetch session data
+  // Fetch active session data
   const fetchSession = async () => {
     if (!user) return
     try {
-      const { data: session } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('student_id', user.id)
-        .in('status', ['ACTIVE', 'AWAY'])
-        .maybeSingle()
+      const res = await fetch('/api/session')
+      const data = await res.json()
 
-      if (!session) {
+      if (!data.session) {
         router.push('/dashboard')
         return
       }
 
-      setSessionData(session)
-      setAwayModeActive(session.status === 'AWAY')
-
-      // Fetch desk details
-      const { data: desk } = await supabase
-        .from('desks')
-        .select('*')
-        .eq('id', session.desk_id)
-        .single()
-      
-      setDeskData(desk)
-
-      // Fetch settings
-      const { data: settings } = await supabase
-        .from('settings')
-        .select('*')
-      
-      const settingsMap = (settings || []).reduce((acc: any, s: any) => {
-        acc[s.key] = s.value
-        return acc
-      }, {})
-
-      const limitHours = parseInt(settingsMap['session_limit_hours'] ?? '3', 10)
-      const limitMinutes = parseInt(settingsMap['away_limit_minutes'] ?? '30', 10)
-      setSessionLimitHours(limitHours)
-      setAwayLimitMinutes(limitMinutes)
+      setSessionData(data.session)
+      setAwayModeActive(data.session.status === 'AWAY')
 
       // Calculate initial timers
-      const elapsed = Math.floor((Date.now() - new Date(session.checked_in_at).getTime()) / 1000)
+      const elapsed = Math.floor((Date.now() - new Date(data.session.start_time).getTime()) / 1000)
       setTimerSeconds(elapsed)
 
-      if (session.status === 'AWAY' && session.away_started_at) {
-        const elapsedAway = Math.floor((Date.now() - new Date(session.away_started_at).getTime()) / 1000)
-        const remainingAway = Math.max(0, (limitMinutes * 60) - elapsedAway)
+      if (data.session.status === 'AWAY' && data.session.away_started_at) {
+        const elapsedAway = Math.floor((Date.now() - new Date(data.session.away_started_at).getTime()) / 1000)
+        const remainingAway = Math.max(0, (awayLimitMinutes * 60) - elapsedAway)
         setAwayMinutesLeft(Math.floor(remainingAway / 60))
         setAwaySecondsLeft(remainingAway % 60)
-      } else {
-        setAwayMinutesLeft(limitMinutes)
-        setAwaySecondsLeft(0)
       }
     } catch (err: any) {
-      console.error('[DeskGuard]', err.message)
+      console.error('[DeskGuard Session]', err.message)
     } finally {
       setLoading(false)
     }
@@ -110,7 +76,7 @@ export default function SessionPage() {
     if (!sessionData) return
 
     const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - new Date(sessionData.checked_in_at).getTime()) / 1000)
+      const elapsed = Math.floor((Date.now() - new Date(sessionData.start_time).getTime()) / 1000)
       setTimerSeconds(elapsed)
 
       if (awayModeActive && sessionData.away_started_at) {
@@ -122,91 +88,60 @@ export default function SessionPage() {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [sessionData, awayModeActive, awayLimitMinutes])
+  }, [sessionData, awayModeActive])
 
   const handleMarkAway = async () => {
-    if (sessionData && deskData && user) {
-      try {
-        const { data, error } = await supabase.rpc('mark_away', {
-          p_session_id: sessionData.id,
-          p_student_id: user.id
-        })
-        if (error) throw error
-        if (data?.error) throw new Error(data.error)
+    if (!sessionData) return
+    try {
+      const res = await fetch('/api/session/away', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sessionData.session_id }),
+      })
+      const result = await res.json()
+      if (!res.ok || result.error) throw new Error(result.error || 'Failed to mark away')
 
-        const nowStr = new Date().toISOString()
-        setAwayModeActive(true)
-        setSessionData((prev: any) => ({ ...prev, status: 'AWAY', away_started_at: nowStr }))
-        addToast(`Desk ${deskData.id} marked Away. ${awayLimitMinutes}-minute cap started.`, 'warning')
-      } catch (err: any) {
-        console.error(err)
-        addToast(`Failed to mark away: ${err.message || err}`, 'error')
-      }
+      setAwayModeActive(true)
+      setSessionData((prev: any) => ({ ...prev, status: 'AWAY', away_started_at: new Date().toISOString() }))
+      addToast(`Desk ${sessionData.desk_id} marked Away. ${awayLimitMinutes}-minute cap started.`, 'warning')
+    } catch (err: any) {
+      console.error(err)
+      addToast(`Failed to mark away: ${err.message}`, 'error')
     }
   }
 
-  const handleReturnFromAway = async () => {
-    if (sessionData && deskData && user) {
-      try {
-        const { data, error } = await supabase.rpc('mark_back', {
-          p_session_id: sessionData.id,
-          p_student_id: user.id
-        })
-        if (error) throw error
-        if (data?.error) throw new Error(data.error)
-
-        setAwayModeActive(false)
-        setPresenceConfirmed(true)
-        setPresenceAlertActive(false)
-        setSessionData((prev: any) => ({ ...prev, status: 'ACTIVE', away_started_at: null }))
-        addToast('Welcome back! Status restored to ACTIVE.', 'success')
-      } catch (err: any) {
-        console.error(err)
-        addToast(`Failed to return from away: ${err.message || err}`, 'error')
-      }
-    }
-  }
-
-  const handleConfirmPresence = async () => {
-    if (sessionData) {
-      try {
-        const { error } = await supabase
-          .from('sessions')
-          .update({ last_confirmed_at: new Date().toISOString() })
-          .eq('id', sessionData.id)
-        if (error) throw error
-
-        setPresenceConfirmed(true)
-        setPresenceAlertActive(false)
-        addToast('Presence verified. Idle-sweep warnings cleared.', 'success')
-      } catch (err: any) {
-        console.error(err)
-        addToast('Presence confirmation failed.', 'error')
-      }
-    }
+  /**
+   * Spec requirement:
+   * To return from Away mode, students MUST re-scan the current rotating QR code (not press a plain button).
+   */
+  const handleInitiateQrReScan = () => {
+    if (!sessionData) return
+    addToast(`To reactivate your session, scan the rotating QR code on Desk ${sessionData.desk_id}.`, 'info')
+    router.push(`/scan?desk=${sessionData.desk_id}`)
   }
 
   const handleRelease = async () => {
-    if (!deskData || !sessionData || !user) return
-    if (!confirm('Release Desk ' + deskData.id + '? This is irreversible.')) return
+    if (!sessionData) return
+    if (!confirm(`Release Desk ${sessionData.desk_id}? This is irreversible.`)) return
     
     try {
-      const { data, error } = await supabase.rpc('release_desk', {
-        p_session_id: sessionData.id,
-        p_student_id: user.id
+      const res = await fetch('/api/session/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sessionData.session_id }),
       })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
+      const result = await res.json()
+      if (!res.ok || result.error) throw new Error(result.error || 'Release failed')
 
-      addToast(`Desk ${deskData.id} released. Now vacant.`, 'info')
+      addToast(`Desk ${sessionData.desk_id} released. Now vacant.`, 'info')
       router.push('/dashboard')
     } catch (err: any) {
       console.error(err)
-      addToast(`Release failed: ${err.message || err}`, 'error')
+      addToast(`Release failed: ${err.message}`, 'error')
     }
   }
 
-  if (loading || !sessionData || !deskData) {
+  if (loading || !sessionData) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
         <RefreshCw className="w-8 h-8 text-[#FF6B1A] animate-spin" />
@@ -214,7 +149,7 @@ export default function SessionPage() {
     )
   }
 
-  const checkedInTime = new Date(sessionData.checked_in_at)
+  const checkedInTime = new Date(sessionData.start_time)
   const checkedInTimeStr = checkedInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const expiresAtTime = new Date(checkedInTime.getTime() + sessionLimitHours * 3600 * 1000)
   const expiresAtTimeStr = expiresAtTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -224,7 +159,7 @@ export default function SessionPage() {
     <div className="w-full max-w-[800px] mx-auto space-y-6 py-4">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border-custom)] h-[52px] px-6">
-        <h2 className="font-display font-bold text-xl text-[var(--text-primary)]">My Reservational Session</h2>
+        <h2 className="font-display font-bold text-xl text-[var(--text-primary)]">My Desk Session</h2>
         <button
           onClick={() => { setPresenceAlertActive(true); setPresenceConfirmed(false) }}
           className="px-2.5 py-1 text-[10px] uppercase font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--surface)] border border-[var(--border-custom)] rounded-md flex items-center gap-1 cursor-pointer"
@@ -239,11 +174,11 @@ export default function SessionPage() {
           <div className="flex items-center space-x-3 text-left">
             <AlertTriangle className="w-5 h-5 text-[#EF4444] shrink-0" />
             <p className="font-sans text-[13px] text-[#EF4444] leading-relaxed">
-              ⚠ Confirm your presence or desk {deskData.id} will be released
+              ⚠ Confirm your presence or desk {sessionData.desk_id} will be released
             </p>
           </div>
-          <button onClick={handleConfirmPresence} className="px-4 py-1.5 bg-transparent border-2 border-[#F59E0B] text-[#F59E0B] hover:bg-[#F59E0B]/10 rounded-[8px] font-sans text-xs font-bold uppercase tracking-wider transition-all cursor-pointer active:scale-95 whitespace-nowrap">
-            Scan Now
+          <button onClick={handleInitiateQrReScan} className="px-4 py-1.5 bg-transparent border-2 border-[#F59E0B] text-[#F59E0B] hover:bg-[#F59E0B]/10 rounded-[8px] font-sans text-xs font-bold uppercase tracking-wider transition-all cursor-pointer active:scale-95 whitespace-nowrap">
+            Scan QR Now
           </button>
         </div>
       )}
@@ -251,9 +186,9 @@ export default function SessionPage() {
         <div className="w-full bg-[#22C55E]/15 border border-[#22C55E] rounded-[12px] p-4 flex items-center justify-between shadow-lg">
           <div className="flex items-center space-x-3">
             <CheckCircle2 className="w-5 h-5 text-[#22C55E] shrink-0" />
-            <p className="font-sans text-[13px] text-[#22C55E]">✓ Presence verified. Your desk {deskData.id} is active and locked.</p>
+            <p className="font-sans text-[13px] text-[#22C55E]">✓ Presence verified. Your desk {sessionData.desk_id} is active and locked.</p>
           </div>
-          <span className="font-mono text-[10px] text-gray-500 uppercase">SAFE POOL</span>
+          <span className="font-mono text-[10px] text-gray-500 uppercase">ACTIVE LEASE</span>
         </div>
       )}
 
@@ -261,8 +196,8 @@ export default function SessionPage() {
       <div id="active-session-card" className="bg-[#13131A] rounded-[16px] border border-[#FF6B1A]/40 shadow-[0_0_25px_rgba(255,107,26,0.15)] p-8 space-y-8">
         <div className="flex justify-between items-start">
           <div className="space-y-1">
-            <h3 className="font-display font-bold text-[48px] text-white leading-none tracking-tight">{deskData.id}</h3>
-            <p className="font-sans text-[13px] text-[#6B7280]">Row {deskData.row_label} · Seat {deskData.seat_number}</p>
+            <h3 className="font-display font-bold text-[48px] text-white leading-none tracking-tight">{sessionData.desk_id}</h3>
+            <p className="font-sans text-[13px] text-[#6B7280]">Row {sessionData.row_label} · Seat {sessionData.seat_number}</p>
           </div>
           <span className="px-3.5 py-1.5 bg-[#22C55E]/10 border border-[#22C55E]/30 text-[#22C55E] text-xs font-sans font-bold rounded-full uppercase tracking-wider">● Active</span>
         </div>
@@ -311,14 +246,14 @@ export default function SessionPage() {
         </div>
       </div>
 
-      {/* Away mode card */}
+      {/* Away mode card requiring QR re-scan */}
       {awayModeActive && (
         <div id="away-state-card-reference" className="bg-[#13131A] rounded-[16px] border border-[#F59E0B]/40 shadow-[0_0_20px_rgba(245,158,11,0.25)] p-8 space-y-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 bg-[#F59E0B] text-[#0A0A0F] font-mono text-[9px] font-bold px-3.5 py-1 uppercase tracking-wider rounded-br-lg">Away mode active</div>
           <div className="flex justify-between items-start pt-2">
             <div className="space-y-1">
-              <h3 className="font-display font-bold text-[48px] text-white leading-none tracking-tight">{deskData.id}</h3>
-              <p className="font-sans text-[13px] text-[#6B7280]">Row {deskData.row_label} · Seat {deskData.seat_number}</p>
+              <h3 className="font-display font-bold text-[48px] text-white leading-none tracking-tight">{sessionData.desk_id}</h3>
+              <p className="font-sans text-[13px] text-[#6B7280]">Row {sessionData.row_label} · Seat {sessionData.seat_number}</p>
             </div>
             <span className="px-3.5 py-1.5 bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] text-xs font-sans font-bold rounded-full uppercase tracking-wider animate-pulse">● Away</span>
           </div>
@@ -341,10 +276,16 @@ export default function SessionPage() {
             <p className="font-sans text-[11px] text-[#6B7280] font-medium mt-6 uppercase tracking-wider">{awayLimitMinutes} minute retention constraint applies</p>
           </div>
           <div className="border-t border-[#2A2A38]" />
-          <button onClick={handleReturnFromAway}
-            className="w-full py-4 bg-[#F59E0B] hover:bg-[#F59E0B]/90 text-[#0A0A0F] font-display font-bold text-[16px] rounded-[12px] uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2.5 shadow-lg active:scale-[0.99]">
-            <QrCode className="w-5 h-5 text-[#0A0A0F]" /> I'm Back — Scan Desk QR
-          </button>
+          
+          <div className="space-y-3">
+            <p className="font-sans text-xs text-center text-[#F59E0B] font-semibold">
+              To return from Away, scan the rotating QR code on Desk {sessionData.desk_id} to prove physical presence.
+            </p>
+            <button onClick={handleInitiateQrReScan}
+              className="w-full py-4 bg-[#F59E0B] hover:bg-[#F59E0B]/90 text-[#0A0A0F] font-display font-bold text-[16px] rounded-[12px] uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2.5 shadow-lg active:scale-[0.99]">
+              <QrCode className="w-5 h-5 text-[#0A0A0F]" /> Scan Desk QR Code to Return
+            </button>
+          </div>
         </div>
       )}
     </div>

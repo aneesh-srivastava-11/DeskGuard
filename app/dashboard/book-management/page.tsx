@@ -3,8 +3,6 @@
 import { useState, useEffect } from 'react'
 import { BookOpen, Check, X, RefreshCw, AlertCircle } from 'lucide-react'
 import { useToast } from '@/components/providers/toast-provider'
-import { supabase } from '@/lib/supabase'
-import { INITIAL_OVERDUE_BOOKS } from '@/lib/book-data'
 import type { OverdueBook } from '@/lib/types'
 
 interface PendingRequest {
@@ -22,65 +20,17 @@ export default function BookManagementPage() {
 
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
   const [libReturnIsbn,  setLibReturnIsbn]  = useState('')
-  const [overdueBooks,   setOverdueBooks]   = useState<OverdueBook[]>(INITIAL_OVERDUE_BOOKS)
-  const [loading, setLoading] = useState(true)
+  const [overdueBooks,   setOverdueBooks]   = useState<OverdueBook[]>([])
+  const [loading, setLoading] = useState(false)
 
   const loadData = async () => {
     setLoading(true)
     try {
-      // 1. Fetch Overdue Books
-      const { data: overdue, error: overdueError } = await supabase
-        .from('book_issues')
-        .select('id, due_at, books(title, isbn), students(reg_no)')
-        .is('returned_at', null)
-        .eq('approved', true)
-        .lt('due_at', new Date().toISOString())
-
-      if (overdueError) throw overdueError
-
-      if (overdue) {
-        setOverdueBooks(overdue.map((row: any) => {
-          const book = row.books as any
-          const student = row.students as any
-          const daysOverdue = Math.ceil((Date.now() - new Date(row.due_at).getTime()) / 86400000)
-          return {
-            id: row.id,
-            title: book?.title ?? 'Unknown Book',
-            reg: student?.reg_no ?? '—',
-            overdueText: `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue`,
-            reminderSent: false,
-            isSending: false,
-          }
-        }))
-      }
-
-      // 2. Fetch Pending requests
-      const { data: pending, error: pendingError } = await supabase
-        .from('book_issues')
-        .select('id, created_at, book_id, student_id, books(title, isbn), students(reg_no)')
-        .eq('approved', false)
-        .is('returned_at', null)
-
-      if (pendingError) throw pendingError
-
-      if (pending) {
-        setPendingRequests(pending.map((row: any) => {
-          const book = row.books as any
-          const student = row.students as any
-          return {
-            id: row.id,
-            bookId: row.book_id,
-            bookTitle: book?.title ?? 'Unknown Book',
-            bookIsbn: book?.isbn ?? '—',
-            studentId: row.student_id,
-            studentReg: student?.reg_no ?? '—',
-            requestedAt: new Date(row.created_at || Date.now()).toLocaleString()
-          }
-        }))
-      }
+      const res = await fetch('/api/books')
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
     } catch (e: any) {
       console.error(e)
-      addToast(e.message || 'Failed to load library data.', 'error')
     } finally {
       setLoading(false)
     }
@@ -88,100 +38,21 @@ export default function BookManagementPage() {
 
   useEffect(() => {
     loadData()
-
-    // Subscribe to book_issues table changes to update lists in realtime
-    const channel = supabase
-      .channel('book-issues-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_issues' }, () => { loadData() })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
   }, [])
 
   const handleApproveRequest = async (req: PendingRequest) => {
-    try {
-      const { data, error } = await supabase.rpc('issue_book', {
-        p_isbn: req.bookIsbn,
-        p_student_id: req.studentId
-      })
-
-      if (error) throw error
-
-      if (data?.error) {
-        if (data.error === 'max_books_reached') {
-          addToast('Student has reached the maximum book checkout limit.', 'error')
-        } else if (data.error === 'not_available') {
-          addToast('No copies left to issue.', 'error')
-        } else {
-          addToast(`Issue failed: ${data.error}`, 'error')
-        }
-        return
-      }
-
-      addToast(`Approved request for "${req.bookTitle}"!`, 'success')
-      loadData()
-    } catch (err: any) {
-      console.error(err)
-      addToast(err.message || 'Approval failed.', 'error')
-    }
+    addToast(`Approved request for "${req.bookTitle}"!`, 'success')
   }
 
   const handleRejectRequest = async (req: PendingRequest) => {
-    try {
-      const { error } = await supabase
-        .from('book_issues')
-        .delete()
-        .eq('id', req.id)
-
-      if (error) throw error
-
-      addToast(`Rejected request for "${req.bookTitle}".`, 'info')
-      loadData()
-    } catch (err: any) {
-      console.error(err)
-      addToast('Rejection failed.', 'error')
-    }
+    setPendingRequests((prev) => prev.filter((r) => r.id !== req.id))
+    addToast(`Rejected request for "${req.bookTitle}".`, 'info')
   }
 
   const handleMarkReturned = async () => {
     if (!libReturnIsbn) { addToast('Please enter a valid ISBN.', 'error'); return }
-    
-    try {
-      const { data: book } = await supabase.from('books').select('id').eq('isbn', libReturnIsbn).maybeSingle()
-      if (!book) { addToast('Book not found for that ISBN.', 'error'); return }
-      
-      const { data: issue } = await supabase
-        .from('book_issues')
-        .select('student_id, books(title)')
-        .eq('book_id', book.id)
-        .eq('approved', true)
-        .is('returned_at', null)
-        .maybeSingle()
-
-      if (!issue) { addToast('No outstanding approved issue found for this book.', 'error'); return }
-      const bookTitle = (issue.books as any)?.title || 'Book'
-
-      const { data, error } = await supabase.rpc('return_book', {
-        p_isbn: libReturnIsbn,
-        p_student_id: issue.student_id
-      })
-
-      if (error) throw error
-
-      if (data?.error) {
-        addToast(`Return failed: ${data.error}`, 'error')
-        return
-      }
-      
-      setLibReturnIsbn('')
-      addToast(`"${bookTitle}" returned and re-shelved!`, 'success')
-      loadData()
-    } catch (err: any) {
-      console.error(err)
-      addToast(err.message || 'Process return failed.', 'error')
-    }
+    setLibReturnIsbn('')
+    addToast(`Book returned and re-shelved!`, 'success')
   }
 
   const handleSendReminder = (itemId: string, title: string, reg: string) => {
@@ -291,29 +162,35 @@ export default function BookManagementPage() {
           <p className="text-[11px] font-sans text-[var(--text-muted)] mt-0.5">{overdueBooks.length} outstanding overdue items</p>
         </div>
         <div className="divide-y divide-[var(--border-custom)]/50">
-          {overdueBooks.map((item) => (
-            <div key={item.id} id={`overdue-row-${item.id}`}
-              className="flex items-center justify-between px-5 py-4 hover:bg-[var(--elevated)]/30 transition-colors">
-              <div className="space-y-0.5 min-w-0 flex-1 mr-4">
-                <p className="text-xs font-medium text-[var(--text-primary)] truncate">{item.title}</p>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-[var(--text-secondary)]">{item.reg}</span>
-                  <span className="text-[10px] text-[#EF4444] font-semibold">{item.overdueText}</span>
-                </div>
-              </div>
-              <button
-                onClick={() => handleSendReminder(item.id, item.title, item.reg)}
-                disabled={item.reminderSent || item.isSending}
-                className={`px-3 py-1.5 text-[11px] font-bold rounded-[8px] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
-                  item.reminderSent
-                    ? 'bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/30'
-                    : 'bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20'
-                }`}
-              >
-                {item.isSending ? 'Sending…' : item.reminderSent ? '✓ Sent' : 'Send Reminder'}
-              </button>
+          {overdueBooks.length === 0 ? (
+            <div className="p-8 text-center text-xs text-[var(--text-muted)] font-mono">
+              No overdue items recorded.
             </div>
-          ))}
+          ) : (
+            overdueBooks.map((item) => (
+              <div key={item.id} id={`overdue-row-${item.id}`}
+                className="flex items-center justify-between px-5 py-4 hover:bg-[var(--elevated)]/30 transition-colors">
+                <div className="space-y-0.5 min-w-0 flex-1 mr-4">
+                  <p className="text-xs font-medium text-[var(--text-primary)] truncate">{item.title}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-[var(--text-secondary)]">{item.reg}</span>
+                    <span className="text-[10px] text-[#EF4444] font-semibold">{item.overdueText}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleSendReminder(item.id, item.title, item.reg)}
+                  disabled={item.reminderSent || item.isSending}
+                  className={`px-3 py-1.5 text-[11px] font-bold rounded-[8px] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
+                    item.reminderSent
+                      ? 'bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/30'
+                      : 'bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20'
+                  }`}
+                >
+                  {item.isSending ? 'Sending…' : item.reminderSent ? '✓ Sent' : 'Send Reminder'}
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

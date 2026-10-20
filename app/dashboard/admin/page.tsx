@@ -4,15 +4,13 @@ import { useState, useEffect } from 'react'
 import { Bell, QrCode, RefreshCw, Zap, X } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
-import { supabase } from '@/lib/supabase'
-import { INITIAL_DESKS } from '@/lib/desk-data'
 import type { Desk } from '@/lib/types'
 
 export default function LibrarianDashboardPage() {
   const { user } = useAuth()
   const { addToast } = useToast()
 
-  const [desks, setDesks]     = useState<Desk[]>(INITIAL_DESKS)
+  const [desks, setDesks]     = useState<Desk[]>([])
   const [qrModal, setQrModal] = useState<{ deskId: string; dataUrl: string } | null>(null)
   const [loadingQr, setLoadingQr] = useState(false)
   
@@ -21,101 +19,42 @@ export default function LibrarianDashboardPage() {
 
   const abandonedDesks = desks.filter((d) => d.status === 'abandoned')
 
-  const load = async () => {
-    // 1. Load desks and active sessions
-    const { data: desksData } = await supabase.from('desks').select('*')
-    const { data: sessionsData } = await supabase
-      .from('sessions')
-      .select('desk_id, checked_in_at, students(reg_no, name)')
-      .in('status', ['ACTIVE', 'AWAY', 'ABANDONED'])
-
-    if (desksData?.length) {
-      const activeSessionsMap = new Map<string, any>()
-      if (sessionsData) {
-        sessionsData.forEach((s: any) => {
-          activeSessionsMap.set(s.desk_id, s)
-        })
-      }
-
-      setDesks(desksData.map((d: Record<string, unknown>) => {
-        const deskId = d.id as string
-        const session = activeSessionsMap.get(deskId)
-        
-        let occupiedSince: string | null = null
-        let durationText: string | null = null
-        let occupantId: string | null = null
-        let occupantName: string | null = null
-
-        if (session) {
-          occupiedSince = new Date(session.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          const elapsedMin = Math.floor((Date.now() - new Date(session.checked_in_at).getTime()) / 60000)
-          durationText = elapsedMin > 60 
-            ? `${Math.floor(elapsedMin / 60)}h ${elapsedMin % 60}m` 
-            : `${elapsedMin}m`
-          occupantId = session.students?.reg_no || '—'
-          occupantName = session.students?.name || '—'
-        }
-
-        return {
-          id: deskId,
-          row: d.row_label as string,
-          seat: d.seat_number as number,
-          status: (d.status as string).toLowerCase() as Desk['status'],
-          occupiedSince,
-          durationText,
-          occupantId,
-          occupantName,
-          hasPower: d.has_power as boolean,
-          isWindow: d.is_window as boolean,
-        }
-      }))
-    }
-
-    // 2. Load pending issue requests count
-    try {
-      const { count } = await supabase
-        .from('book_issues')
-        .select('*', { count: 'exact', head: true })
-        .eq('approved', false)
-        .is('returned_at', null)
-      setPendingCount(count || 0)
-    } catch (err) {
-      console.error(err)
-    }
-  }
-
   useEffect(() => {
-    load()
-    
-    // Subscribe to desks, sessions, and book_issues changes to refresh map and counts in realtime
-    const channel = supabase
-      .channel('admin-dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'desks' }, () => { load() })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => { load() })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_issues' }, () => { load() })
-      .subscribe()
+    const eventSource = new EventSource('/api/realtime/desks')
 
-    const interval = setInterval(load, 30000)
-    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (Array.isArray(data)) {
+          setDesks(data.map((d: any) => ({
+            id: d.id,
+            row: d.row,
+            seat: d.seat,
+            status: (d.status ?? 'free').toLowerCase() as Desk['status'],
+            occupiedSince: null,
+            durationText: null,
+            occupantId: null,
+            occupantName: null,
+            hasPower: Boolean(d.hasPower),
+            isWindow: Boolean(d.isWindow),
+          })))
+        }
+      } catch (err: any) {
+        console.error('[SSE Error]', err.message)
+      }
+    }
+
     return () => {
-      clearInterval(interval)
-      supabase.removeChannel(channel)
+      eventSource.close()
     }
   }, [])
 
   const handleReset = async (deskId: string) => {
-    await supabase.from('sessions').update({ status: 'RELEASED' }).eq('desk_id', deskId).in('status', ['ACTIVE','AWAY','ABANDONED'])
-    await supabase.from('desks').update({ status: 'FREE' }).eq('id', deskId)
     setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: 'free', occupantId: null } : d))
     addToast(`Desk ${deskId} reset — returned to free pool.`, 'success')
   }
 
   const handleSetMaintenance = async (deskId: string, enable: boolean) => {
-    const status = enable ? 'MAINTENANCE' : 'FREE'
-    if (enable) {
-      await supabase.from('sessions').update({ status: 'RELEASED', released_at: new Date().toISOString() }).eq('desk_id', deskId).in('status', ['ACTIVE','AWAY','ABANDONED'])
-    }
-    await supabase.from('desks').update({ status }).eq('id', deskId)
     setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: enable ? 'maintenance' : 'free', occupantId: null } : d))
     addToast(`Desk ${deskId} status updated to ${enable ? 'Maintenance' : 'Normal'}.`, 'success')
   }
@@ -126,13 +65,12 @@ export default function LibrarianDashboardPage() {
       const res = await fetch(`/api/qr?deskId=${encodeURIComponent(deskId)}`)
       const result = await res.json()
       if (result.error) {
-        console.error('[DeskGuard]', result.error)
         addToast(result.error, 'error')
       } else {
         setQrModal({ deskId, dataUrl: result.dataUrl })
       }
     } catch (err: any) {
-      console.error('[DeskGuard]', err.message)
+      console.error(err.message)
       addToast('Failed to load QR code', 'error')
     } finally {
       setLoadingQr(false)
@@ -146,14 +84,13 @@ export default function LibrarianDashboardPage() {
       const res = await fetch(`/api/qr?deskId=${encodeURIComponent(qrModal.deskId)}`)
       const result = await res.json()
       if (result.error) {
-        console.error('[DeskGuard]', result.error)
         addToast(result.error, 'error')
       } else {
         setQrModal({ ...qrModal, dataUrl: result.dataUrl })
         addToast('QR regenerated — old code expired.', 'info')
       }
     } catch (err: any) {
-      console.error('[DeskGuard]', err.message)
+      console.error(err.message)
       addToast('Failed to regenerate QR code', 'error')
     } finally {
       setLoadingQr(false)
@@ -165,7 +102,6 @@ export default function LibrarianDashboardPage() {
   const computedAway      = desks.filter((d) => d.status === 'away').length
   const computedAbandoned = desks.filter((d) => d.status === 'abandoned').length
 
-  // Build notifications array
   const notifications: { type: 'abandoned' | 'request'; message: string; id: string }[] = []
   abandonedDesks.forEach(d => {
     notifications.push({
@@ -285,9 +221,6 @@ export default function LibrarianDashboardPage() {
       <div className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] overflow-hidden">
         <div className="p-5 border-b border-[var(--border-custom)] flex items-center justify-between">
           <h3 className="font-display font-bold text-sm text-[var(--text-primary)]">All Desks Overview</h3>
-          <button onClick={load} className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1 hover:text-[var(--text-primary)] cursor-pointer">
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
-          </button>
         </div>
         <div className="overflow-x-auto">
           <table id="librarian-desk-table" className="w-full text-xs font-sans">

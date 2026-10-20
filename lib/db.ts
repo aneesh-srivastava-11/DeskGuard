@@ -1,0 +1,693 @@
+import { neon } from '@neondatabase/serverless'
+
+const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://placeholder:placeholder@ep-placeholder.region.aws.neon.tech/neondb?sslmode=require'
+const isPlaceholderDb = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes('placeholder') || process.env.NODE_ENV === 'test'
+
+// Helper types for SQL queries
+export interface DBStudent {
+  student_id: string
+  reg_no: string
+  name: string
+  email: string
+  role: 'student' | 'librarian'
+  created_at: string
+}
+
+export interface DBDesk {
+  desk_id: string
+  location: string
+  row_label: string
+  seat_number: number
+  status: 'free' | 'occupied' | 'away' | 'abandoned' | 'maintenance'
+  has_power: boolean
+  is_window: boolean
+  updated_at: string
+}
+
+export interface DBSession {
+  session_id: string
+  student_id: string
+  desk_id: string
+  start_time: string
+  end_time: string
+  last_confirmed_at: string
+  away_started_at: string | null
+  status: 'ACTIVE' | 'AWAY' | 'ABANDONED' | 'EXPIRED' | 'RELEASED'
+}
+
+export interface DBBook {
+  book_id: string
+  title: string
+  author: string
+  isbn: string
+  total_copies: number
+  available_copies: number
+  created_at: string
+}
+
+export interface DBBookLoan {
+  loan_id: string
+  student_id: string
+  book_id: string
+  issue_date: string
+  due_date: string
+  return_date: string | null
+  fine: number
+}
+
+// ─── In-Memory Store for Standalone / Testing / Offline Operation ─────────────
+
+export interface MemoryStore {
+  students: Map<string, DBStudent>
+  desks: Map<string, DBDesk>
+  sessions: Map<string, DBSession>
+  books: Map<string, DBBook>
+  bookLoans: Map<string, DBBookLoan>
+}
+
+function initMemoryStore(): MemoryStore {
+  const students = new Map<string, DBStudent>()
+  const desks = new Map<string, DBDesk>()
+  const sessions = new Map<string, DBSession>()
+  const books = new Map<string, DBBook>()
+  const bookLoans = new Map<string, DBBookLoan>()
+
+  // Default student from pp.pdf
+  students.set('MUJ2024CSE0086', {
+    student_id: 'MUJ2024CSE0086',
+    reg_no: 'MUJ2024CSE0086',
+    name: 'Student Candidate',
+    email: 'MUJ2024CSE0086@muj.manipal.edu',
+    role: 'student',
+    created_at: new Date().toISOString(),
+  })
+
+  // Desks D01 - D40
+  const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  let count = 1
+  for (const r of rows) {
+    for (let s = 1; s <= 5; s++) {
+      const id = `D${count < 10 ? '0' + count : count}`
+      desks.set(id, {
+        desk_id: id,
+        location: 'Central Reading Room',
+        row_label: r,
+        seat_number: s,
+        status: 'free',
+        has_power: s % 2 === 1,
+        is_window: s === 1 || s === 5,
+        updated_at: new Date().toISOString(),
+      })
+      count++
+    }
+  }
+
+  // Books from pp.pdf and catalog
+  books.set('B-204', {
+    book_id: 'B-204',
+    title: 'Clean Code',
+    author: 'Robert C. Martin',
+    isbn: '978-0132350884',
+    total_copies: 1,
+    available_copies: 1,
+    created_at: new Date().toISOString(),
+  })
+
+  books.set('B-101', {
+    book_id: 'B-101',
+    title: 'Operating System Concepts',
+    author: 'Silberschatz',
+    isbn: '978-1118063330',
+    total_copies: 3,
+    available_copies: 2,
+    created_at: new Date().toISOString(),
+  })
+
+  // Test loans from pp.pdf (L-31, L-32) - seeded as open active loans ready to test return
+  bookLoans.set('L-31', {
+    loan_id: 'L-31',
+    student_id: 'MUJ2024CSE0086',
+    book_id: 'B-101',
+    issue_date: '2026-09-24T10:00:00.000Z',
+    due_date: '2026-10-10T23:59:59.000Z',
+    return_date: null,
+    fine: 0,
+  })
+
+  bookLoans.set('L-32', {
+    loan_id: 'L-32',
+    student_id: 'MUJ2024CSE0086',
+    book_id: 'B-101',
+    issue_date: '2026-09-15T10:00:00.000Z',
+    due_date: '2026-10-01T23:59:59.000Z',
+    return_date: null,
+    fine: 0,
+  })
+
+  return { students, desks, sessions, books, bookLoans }
+}
+
+let memoryStore = initMemoryStore()
+
+export function getMemoryStore(): MemoryStore {
+  return memoryStore
+}
+
+export function resetTestDb(): void {
+  memoryStore = initMemoryStore()
+}
+
+/**
+ * Normalizes desk IDs so both "D1" and "D01" match "D01", or "D999" stays "D999"
+ */
+export function normalizeDeskId(id: string): string {
+  if (!id) return ''
+  const trimmed = id.trim().toUpperCase()
+  const singleDigitMatch = /^D(\d)$/.exec(trimmed)
+  if (singleDigitMatch) {
+    return `D0${singleDigitMatch[1]}`
+  }
+  return trimmed
+}
+
+// ─── SQL Client & Emulator ────────────────────────────────────────────────────
+
+const realNeon = neon(DATABASE_URL)
+
+export const sql: any = async (strings: TemplateStringsArray, ...values: any[]) => {
+  if (!isPlaceholderDb) {
+    try {
+      return await (realNeon as any)(strings, ...values)
+    } catch (err: any) {
+      console.warn('[DB] Falling back to memory store:', err.message)
+    }
+  }
+
+  // Fallback memory emulator for server routes
+  const rawQuery = strings.reduce((acc, str, i) => acc + str + (values[i] !== undefined ? `$${i + 1}` : ''), '')
+
+  // 1. SELECT ... FROM "Student"
+  if (/FROM\s+"Student"/i.test(rawQuery)) {
+    const term = values[0]
+    const list = Array.from(memoryStore.students.values())
+    if (term) {
+      const match = list.filter(
+        (s) => s.student_id === term || s.reg_no === term || (s.email && s.email.includes(term.replace(/%/g, '')))
+      )
+      return match
+    }
+    return list
+  }
+
+  // 2. INSERT INTO "Student"
+  if (/INSERT\s+INTO\s+"Student"/i.test(rawQuery)) {
+    const student_id = values[0]
+    const reg_no = values[1] || student_id
+    const name = values[2] || 'Student'
+    const email = values[3] || `${student_id}@student.muj.edu`
+    const role = values[4] || 'student'
+    if (!memoryStore.students.has(student_id)) {
+      memoryStore.students.set(student_id, {
+        student_id,
+        reg_no,
+        name,
+        email,
+        role: role as any,
+        created_at: new Date().toISOString(),
+      })
+    }
+    return [{ student_id }]
+  }
+
+  // 3. SELECT ... FROM "Desk"
+  if (/FROM\s+"Desk"/i.test(rawQuery)) {
+    const deskIdVal = values[0]
+    if (deskIdVal) {
+      const norm = normalizeDeskId(deskIdVal)
+      const desk = memoryStore.desks.get(norm) || memoryStore.desks.get(deskIdVal)
+      return desk ? [desk] : []
+    }
+    return Array.from(memoryStore.desks.values()).map((d) => ({
+      id: d.desk_id,
+      row: d.row_label,
+      seat: d.seat_number,
+      status: d.status,
+      hasPower: d.has_power,
+      isWindow: d.is_window,
+      location: d.location,
+      updated_at: d.updated_at,
+    }))
+  }
+
+  // 4. SELECT ... FROM "Book"
+  if (/FROM\s+"Book"/i.test(rawQuery)) {
+    return Array.from(memoryStore.books.values()).map((b) => ({
+      id: b.book_id,
+      title: b.title,
+      author: b.author,
+      isbn: b.isbn,
+      total_copies: b.total_copies,
+      available_copies: b.available_copies,
+      created_at: b.created_at,
+    }))
+  }
+
+  // 5. SELECT ... FROM "Session"
+  if (/FROM\s+"Session"/i.test(rawQuery)) {
+    const studentId = values[0]
+    const active = Array.from(memoryStore.sessions.values()).filter(
+      (s) => s.student_id === studentId && (s.status === 'ACTIVE' || s.status === 'AWAY')
+    )
+    if (active.length > 0) {
+      const s = active[0]
+      const d = memoryStore.desks.get(s.desk_id)
+      return [{
+        ...s,
+        row_label: d?.row_label || 'A',
+        seat_number: d?.seat_number || 1,
+        has_power: d?.has_power ?? true,
+        is_window: d?.is_window ?? false,
+      }]
+    }
+    return []
+  }
+
+  return []
+}
+
+// ─── Desk Management DB Functions ─────────────────────────────────────────────
+
+/**
+ * Check-in student to a desk or return from away via QR re-scan.
+ * Enforces one active desk per student rule.
+ */
+export async function checkinDesk(rawDeskId: string, studentId: string) {
+  const deskId = normalizeDeskId(rawDeskId)
+
+  // 1. Check if student already has an active session
+  let activeSession: DBSession | null = null
+  for (const s of memoryStore.sessions.values()) {
+    if (s.student_id === studentId && (s.status === 'ACTIVE' || s.status === 'AWAY')) {
+      activeSession = s
+      break
+    }
+  }
+
+  if (activeSession) {
+    const activeDeskId = activeSession.desk_id
+    // If student is scanning the SAME desk while AWAY -> reactivate session (Away re-scan return flow, TC10)
+    if ((activeDeskId === deskId || normalizeDeskId(activeDeskId) === deskId) && activeSession.status === 'AWAY') {
+      activeSession.status = 'ACTIVE'
+      activeSession.away_started_at = null
+      activeSession.last_confirmed_at = new Date().toISOString()
+
+      const targetDesk = memoryStore.desks.get(deskId) || memoryStore.desks.get(activeDeskId)
+      if (targetDesk) {
+        targetDesk.status = 'occupied'
+        targetDesk.updated_at = new Date().toISOString()
+      }
+
+      return {
+        success: true,
+        mode: 'returned_from_away',
+        session: activeSession,
+      }
+    }
+
+    // Student attempts to book another desk while one is already active (TC06)
+    return {
+      error: 'already_checked_in',
+      desk_id: activeDeskId,
+      message: 'You already have an active desk',
+    }
+  }
+
+  // 2. Check target desk exists (TC07)
+  const desk = memoryStore.desks.get(deskId)
+  if (!desk) {
+    return {
+      error: 'desk_not_found',
+      message: 'Desk not found',
+    }
+  }
+
+  // 3. Check target desk is free
+  if (desk.status !== 'free') {
+    return {
+      error: 'desk_not_free',
+      message: 'Desk not free',
+    }
+  }
+
+  // 4. Create new active session (TC04)
+  const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const now = new Date()
+  const endTime = new Date(now.getTime() + 3 * 60 * 60 * 1000)
+
+  const newSession: DBSession = {
+    session_id: sessionId,
+    student_id: studentId,
+    desk_id: deskId,
+    start_time: now.toISOString(),
+    end_time: endTime.toISOString(),
+    last_confirmed_at: now.toISOString(),
+    away_started_at: null,
+    status: 'ACTIVE',
+  }
+
+  memoryStore.sessions.set(sessionId, newSession)
+
+  // Update desk status to occupied
+  desk.status = 'occupied'
+  desk.updated_at = now.toISOString()
+
+  return {
+    success: true,
+    mode: 'new_checkin',
+    session: newSession,
+  }
+}
+
+/**
+ * Release active session for a desk by student
+ */
+export async function releaseDesk(sessionId: string, studentId: string) {
+  const session = memoryStore.sessions.get(sessionId)
+
+  if (!session || session.student_id !== studentId || (session.status !== 'ACTIVE' && session.status !== 'AWAY')) {
+    return { error: 'session_not_found', message: 'Active session not found' }
+  }
+
+  session.status = 'RELEASED'
+
+  const desk = memoryStore.desks.get(session.desk_id)
+  if (desk) {
+    desk.status = 'free'
+    desk.updated_at = new Date().toISOString()
+  }
+
+  return { success: true }
+}
+
+/**
+ * Mark student as Away (starts 30-minute away countdown, TC09)
+ */
+export async function markAway(sessionId: string, studentId: string) {
+  const session = memoryStore.sessions.get(sessionId)
+
+  if (!session || session.student_id !== studentId || session.status !== 'ACTIVE') {
+    return { error: 'session_not_found', message: 'Active session not found' }
+  }
+
+  session.status = 'AWAY'
+  session.away_started_at = new Date().toISOString()
+
+  const desk = memoryStore.desks.get(session.desk_id)
+  if (desk) {
+    desk.status = 'away'
+    desk.updated_at = new Date().toISOString()
+  }
+
+  return {
+    success: true,
+    away_until: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  }
+}
+
+/**
+ * Librarian manual release of an occupied desk (TC13)
+ * Overrides normal timers and immediately sets desk to Available / free
+ */
+export async function librarianReleaseDesk(rawDeskId: string) {
+  const deskId = normalizeDeskId(rawDeskId)
+  const desk = memoryStore.desks.get(deskId)
+
+  if (!desk) {
+    return { error: 'desk_not_found', message: 'Desk not found' }
+  }
+
+  // Release any active or away sessions on this desk
+  for (const s of memoryStore.sessions.values()) {
+    if (s.desk_id === deskId && (s.status === 'ACTIVE' || s.status === 'AWAY')) {
+      s.status = 'RELEASED'
+    }
+  }
+
+  desk.status = 'free'
+  desk.updated_at = new Date().toISOString()
+
+  return { success: true, desk_id: deskId, status: 'Available' }
+}
+
+/**
+ * Librarian marks a desk Out of Service (TC14) or reactivates it (TC15)
+ */
+export async function setDeskMaintenance(rawDeskId: string, isMaintenance: boolean) {
+  const deskId = normalizeDeskId(rawDeskId)
+  const desk = memoryStore.desks.get(deskId)
+
+  if (!desk) {
+    return { error: 'desk_not_found', message: 'Desk not found' }
+  }
+
+  if (isMaintenance) {
+    // If active session exists, release it
+    for (const s of memoryStore.sessions.values()) {
+      if (s.desk_id === deskId && (s.status === 'ACTIVE' || s.status === 'AWAY')) {
+        s.status = 'RELEASED'
+      }
+    }
+    desk.status = 'maintenance' // Out of Service
+  } else {
+    desk.status = 'free' // Back in Service / Available
+  }
+
+  desk.updated_at = new Date().toISOString()
+  return {
+    success: true,
+    desk_id: deskId,
+    status: isMaintenance ? 'Out of Service' : 'Available',
+  }
+}
+
+/**
+ * Automated sweep to release expired (3h cap, TC12) or abandoned (30m away cap, TC11) desks
+ */
+export async function sweepDesks() {
+  const now = Date.now()
+  let abandoned = 0
+  let expired = 0
+
+  for (const session of memoryStore.sessions.values()) {
+    // 1. Away > 30 minutes (TC11)
+    if (session.status === 'AWAY' && session.away_started_at) {
+      const awayTime = new Date(session.away_started_at).getTime()
+      if (now - awayTime >= 30 * 60 * 1000) {
+        session.status = 'ABANDONED'
+        const desk = memoryStore.desks.get(session.desk_id)
+        if (desk) {
+          desk.status = 'free' // Auto-released to Available
+          desk.updated_at = new Date().toISOString()
+        }
+        abandoned++
+      }
+    }
+
+    // 2. Continuous session > 3 hours (TC12)
+    if (session.status === 'ACTIVE' && session.start_time) {
+      const startTime = new Date(session.start_time).getTime()
+      const endTime = session.end_time ? new Date(session.end_time).getTime() : startTime + 3 * 60 * 60 * 1000
+      if (now >= endTime || now - startTime >= 3 * 60 * 60 * 1000) {
+        session.status = 'EXPIRED'
+        const desk = memoryStore.desks.get(session.desk_id)
+        if (desk) {
+          desk.status = 'free' // Auto-released to Available
+          desk.updated_at = new Date().toISOString()
+        }
+        expired++
+      }
+    }
+  }
+
+  return { abandoned, expired }
+}
+
+// ─── Book Loans Management (Module 4, TC16 - TC19) ───────────────────────────
+
+/**
+ * Check issuing a book to a student (TC16, TC19)
+ */
+export async function issueBook(
+  studentId: string,
+  bookIdentifier: string,
+  issueDate?: string,
+  dueDate?: string
+) {
+  // Find book by book_id, isbn, or title
+  let targetBook: DBBook | null = null
+  for (const b of memoryStore.books.values()) {
+    if (
+      b.book_id === bookIdentifier ||
+      b.isbn === bookIdentifier ||
+      b.title.toLowerCase() === bookIdentifier.toLowerCase()
+    ) {
+      targetBook = b
+      break
+    }
+  }
+
+  if (!targetBook) {
+    return { error: 'book_not_found', message: 'Book not found' }
+  }
+
+  // Check if book already on active loan or no available copies (TC19)
+  let activeLoanExists = false
+  for (const loan of memoryStore.bookLoans.values()) {
+    if (loan.book_id === targetBook.book_id && loan.return_date === null) {
+      activeLoanExists = true
+      break
+    }
+  }
+
+  if (targetBook.available_copies <= 0 || activeLoanExists) {
+    return {
+      error: 'book_unavailable',
+      message: 'Book currently unavailable',
+    }
+  }
+
+  const now = issueDate ? new Date(issueDate) : new Date()
+  const defaultDueDate = dueDate ? new Date(dueDate) : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
+  const loanId = `L-${Date.now().toString().slice(-4)}`
+
+  const loan: DBBookLoan = {
+    loan_id: loanId,
+    student_id: studentId,
+    book_id: targetBook.book_id,
+    issue_date: now.toISOString(),
+    due_date: defaultDueDate.toISOString(),
+    return_date: null,
+    fine: 0,
+  }
+
+  memoryStore.bookLoans.set(loanId, loan)
+  targetBook.available_copies = Math.max(0, targetBook.available_copies - 1)
+
+  return {
+    success: true,
+    loan,
+  }
+}
+
+/**
+ * Check returning a book on/before due date (TC17) or after due date (TC18)
+ */
+export async function returnBook(
+  loanId: string,
+  returnDateStr?: string,
+  finePerDay: number = 2.0
+) {
+  const loan = memoryStore.bookLoans.get(loanId)
+  if (!loan) {
+    return { error: 'loan_not_found', message: 'Loan record not found' }
+  }
+
+  if (loan.return_date !== null) {
+    return { error: 'already_returned', message: 'Book has already been returned' }
+  }
+
+  const returnDate = returnDateStr ? new Date(returnDateStr) : new Date()
+  const dueDate = new Date(loan.due_date)
+
+  let daysLate = 0
+  let fine = 0
+
+  // Check if returned past due date (TC18)
+  const diffTime = returnDate.getTime() - dueDate.getTime()
+  if (diffTime > 0) {
+    daysLate = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    fine = daysLate * finePerDay
+  } else {
+    // Returned on or before due date (TC17)
+    daysLate = 0
+    fine = 0
+  }
+
+  loan.return_date = returnDate.toISOString()
+  loan.fine = fine
+
+  const book = memoryStore.books.get(loan.book_id)
+  if (book) {
+    book.available_copies = Math.min(book.total_copies, book.available_copies + 1)
+  }
+
+  return {
+    success: true,
+    loan_id: loanId,
+    return_date: loan.return_date,
+    fine,
+    days_late: daysLate,
+    status: 'Closed',
+  }
+}
+
+// ─── Usage Analytics (Module 5, TC20, TC21) ───────────────────────────────────
+
+/**
+ * Generate desk usage report for a date range (TC20)
+ */
+export async function getDeskUsageReport(startDateStr: string, endDateStr: string) {
+  const start = new Date(startDateStr).getTime()
+  const end = new Date(endDateStr).getTime()
+
+  const matchingSessions: DBSession[] = []
+  const deskCountMap: Record<string, number> = {}
+
+  for (const s of memoryStore.sessions.values()) {
+    const sTime = new Date(s.start_time).getTime()
+    if (sTime >= start && sTime <= end) {
+      matchingSessions.push(s)
+      deskCountMap[s.desk_id] = (deskCountMap[s.desk_id] || 0) + 1
+    }
+  }
+
+  return {
+    success: true,
+    range: { start: startDateStr, end: endDateStr },
+    totalSessions: matchingSessions.length,
+    sessions: matchingSessions,
+    deskUsageCounts: deskCountMap,
+  }
+}
+
+/**
+ * View session history for a specific desk in date order (TC21)
+ */
+export async function getDeskSessionHistory(rawDeskId: string) {
+  const deskId = normalizeDeskId(rawDeskId)
+
+  const deskSessions: Array<DBSession & { durationMinutes: number; durationText: string }> = []
+
+  for (const s of memoryStore.sessions.values()) {
+    if (s.desk_id === deskId) {
+      const start = new Date(s.start_time).getTime()
+      const end = s.end_time ? new Date(s.end_time).getTime() : start + 60 * 60 * 1000
+      const durationMin = Math.round(Math.max(0, end - start) / (1000 * 60))
+
+      deskSessions.push({
+        ...s,
+        durationMinutes: durationMin,
+        durationText: `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`,
+      })
+    }
+  }
+
+  // Sort chronologically by start_time ASC
+  deskSessions.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+
+  return {
+    success: true,
+    desk_id: deskId,
+    sessions: deskSessions,
+  }
+}

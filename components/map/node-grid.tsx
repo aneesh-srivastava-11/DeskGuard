@@ -35,6 +35,7 @@ export function NodeGrid({ desks, selectedDeskId, onDeskClick }: NodeGridProps) 
                     const isSelected = selectedDeskId === desk.id
                     const displayStatus = isLibrarian ? desk.status : (
                       desk.status === 'free' ? 'free' :
+                      desk.status === 'away' ? 'away' :
                       desk.status === 'maintenance' ? 'maintenance' :
                       'occupied'
                     )

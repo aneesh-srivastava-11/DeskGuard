@@ -6,8 +6,6 @@ import { Bell, RefreshCw, Cpu, Zap, LogOut, QrCode, Loader2 } from 'lucide-react
 import { NodeGrid, InfoPanel } from '@/components/map/node-grid'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
-import { supabase } from '@/lib/supabase'
-import { INITIAL_DESKS } from '@/lib/desk-data'
 import type { Desk } from '@/lib/types'
 import { useRouter } from 'next/navigation'
 
@@ -16,12 +14,12 @@ export default function LiveMapPage() {
   const { addToast } = useToast()
   const router = useRouter()
 
-  const [desks, setDesks]                   = useState<Desk[]>(INITIAL_DESKS)
-  const [selectedDeskId, setSelectedDeskId] = useState('D14')
+  const [desks, setDesks]                   = useState<Desk[]>([])
+  const [selectedDeskId, setSelectedDeskId] = useState('D01')
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false)
-  const [lastUpdatedTime, setLastUpdatedTime]     = useState(8)
+  const [lastUpdatedTime, setLastUpdatedTime]     = useState(0)
   const [logs, setLogs] = useState<string[]>([
-    'Secure LRN link initialized.',
+    'Server-Sent Events (SSE) telemetry connection initialized.',
     'Desk C4 (D14) mapped to active session 3h lease cap.',
     'Row D Seat 4 (D19) status flag set to ABANDONED (idle timer timeout).',
   ])
@@ -31,101 +29,54 @@ export default function LiveMapPage() {
 
   const isLibrarian = user?.role === 'librarian'
 
-  // Fetch desks from Supabase on mount
+  // Subscribe to Server-Sent Events (SSE) for live desk streaming
   useEffect(() => {
-    const load = async () => {
-      const { data: desksData } = await supabase.from('desks').select('*')
-      const { data: sessionsData } = await supabase
-        .from('sessions')
-        .select('desk_id, checked_in_at, students(reg_no, name)')
-        .in('status', ['ACTIVE', 'AWAY', 'ABANDONED'])
+    const eventSource = new EventSource('/api/realtime/desks')
 
-      if (desksData?.length) {
-        const activeSessionsMap = new Map<string, any>()
-        if (sessionsData) {
-          sessionsData.forEach((s: any) => {
-            activeSessionsMap.set(s.desk_id, s)
-          })
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (Array.isArray(data)) {
+          setDesks(data.map((d: any) => ({
+            id: d.id,
+            row: d.row,
+            seat: d.seat,
+            status: (d.status ?? 'free').toLowerCase() as Desk['status'],
+            occupiedSince: null,
+            durationText: null,
+            occupantId: null,
+            occupantName: null,
+            hasPower: Boolean(d.hasPower),
+            isWindow: Boolean(d.isWindow),
+          })))
+          setLastUpdatedTime(0)
         }
-
-        setDesks(desksData.map((d: Record<string, unknown>) => {
-          const deskId = d.id as string
-          const session = activeSessionsMap.get(deskId)
-          
-          let occupiedSince: string | null = null
-          let durationText: string | null = null
-          let occupantId: string | null = null
-          let occupantName: string | null = null
-
-          if (session) {
-            occupiedSince = new Date(session.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            const elapsedMin = Math.floor((Date.now() - new Date(session.checked_in_at).getTime()) / 60000)
-            durationText = elapsedMin > 60 
-              ? `${Math.floor(elapsedMin / 60)}h ${elapsedMin % 60}m` 
-              : `${elapsedMin}m`
-            occupantId = session.students?.reg_no || '—'
-            occupantName = session.students?.name || '—'
-          }
-
-          return {
-            id: deskId,
-            row: d.row_label as string,
-            seat: d.seat_number as number,
-            status: (d.status as string).toLowerCase() as Desk['status'],
-            occupiedSince,
-            durationText,
-            occupantId,
-            occupantName,
-            hasPower: d.has_power as boolean,
-            isWindow: d.is_window as boolean,
-          }
-        }))
+      } catch (err: any) {
+        console.error('[SSE Parse Error]', err.message)
       }
     }
-    load()
 
-    // Realtime subscription
-    const channel = supabase
-      .channel('desks-realtime')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'desks'
-      }, (payload) => {
-        if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-          const updated = payload.new as Record<string, any>
-          setDesks((prev) => prev.map((d) =>
-            d.id === updated.id
-              ? {
-                  ...d,
-                  status: (updated.status as string).toLowerCase() as Desk['status'],
-                  hasPower: updated.has_power as boolean,
-                  isWindow: updated.is_window as boolean
-                }
-              : d
-          ))
-          setLogs((prev) => [`[REALTIME] Desk ${updated.id} updated → ${updated.status}`, ...prev])
-        }
-      })
-      .subscribe()
+    eventSource.onerror = (err) => {
+      console.error('[SSE Connection Error]', err)
+    }
 
     return () => {
-      supabase.removeChannel(channel)
+      eventSource.close()
     }
   }, [])
 
-  // Fetch active session for students
+  // Fetch active student session
   useEffect(() => {
     const fetchActiveSession = async () => {
       if (!user || user.role === 'librarian') return
-      const { data } = await supabase
-        .from('sessions')
-        .select('id, desk_id')
-        .eq('student_id', user.id)
-        .in('status', ['ACTIVE', 'AWAY'])
-        .maybeSingle()
-      if (data) {
-        setActiveSession(data)
+      try {
+        const res = await fetch('/api/session')
+        const data = await res.json()
+        if (data.session) {
+          setActiveSession({ id: data.session.session_id, desk_id: data.session.desk_id })
+        }
+      } catch (err: any) {
+        console.error('[Active Session Error]', err.message)
       }
     }
     fetchActiveSession()
@@ -137,7 +88,9 @@ export default function LiveMapPage() {
     return () => clearInterval(t)
   }, [])
 
-  const selectedDesk = desks.find((d) => d.id === selectedDeskId) ?? desks[0]
+  const selectedDesk = desks.find((d) => d.id === selectedDeskId) ?? desks[0] ?? {
+    id: 'D01', row: 'A', seat: 1, status: 'free', hasPower: true, isWindow: true
+  }
 
   if (desks.length === 0) {
     return (
@@ -145,7 +98,7 @@ export default function LiveMapPage() {
         <div className="flex flex-col items-center gap-4">
           <RefreshCw className="w-8 h-8 text-[#FF6B1A] animate-spin" />
           <p className="font-mono text-xs text-[var(--text-secondary)] uppercase tracking-widest">
-            Loading Live Map...
+            Connecting to Live Telemetry Feed...
           </p>
         </div>
       </div>
@@ -188,32 +141,19 @@ export default function LiveMapPage() {
   }
 
   const handleRelease = async (deskId: string) => {
+    if (!activeSession) return
     try {
-      const { data: session } = await supabase
-        .from('sessions')
-        .select('id, student_id')
-        .eq('desk_id', deskId)
-        .in('status', ['ACTIVE', 'AWAY'])
-        .maybeSingle()
-
-      if (session) {
-        const { data, error: releaseErr } = await supabase.rpc('release_desk', {
-          p_session_id: session.id,
-          p_student_id: session.student_id
-        })
-        if (releaseErr) throw releaseErr
-        if (data?.error) throw new Error(data.error)
-      } else {
-        // Fallback for librarians directly updating
-        const { error: deskErr } = await supabase
-          .from('desks')
-          .update({ status: 'FREE' })
-          .eq('id', deskId)
-        if (deskErr) throw deskErr
-      }
+      const res = await fetch('/api/session/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSession.id }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
 
       setLogs((prev) => [`[RELEASE] Desk ${deskId} released.`, ...prev])
       addToast(`Desk ${deskId} released successfully.`, 'success')
+      setActiveSession(null)
     } catch (err: any) {
       console.error(err)
       addToast(`Release failed: ${err.message}`, 'error')
@@ -222,28 +162,11 @@ export default function LiveMapPage() {
 
   const handleSweep = async (deskId: string) => {
     try {
-      const { data: session } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('desk_id', deskId)
-        .eq('status', 'ABANDONED')
-        .maybeSingle()
+      const res = await fetch('/api/cron/sweep', { method: 'POST' })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
 
-      if (session) {
-        const { error: sessionErr } = await supabase
-          .from('sessions')
-          .update({ status: 'RELEASED' })
-          .eq('id', session.id)
-        if (sessionErr) throw sessionErr
-      }
-
-      const { error: deskErr } = await supabase
-        .from('desks')
-        .update({ status: 'FREE' })
-        .eq('id', deskId)
-      if (deskErr) throw deskErr
-
-      setLogs((prev) => [`[SWEEP] Abandoned flag on Desk ${deskId} cleared.`, ...prev])
+      setLogs((prev) => [`[SWEEP] Abandoned sweep executed for ${deskId}.`, ...prev])
       addToast(`Desk ${deskId} swept — returned to free pool.`, 'success')
     } catch (err: any) {
       console.error(err)
@@ -259,16 +182,16 @@ export default function LiveMapPage() {
           <h2 className="font-display font-bold text-[22px] text-[var(--text-primary)] tracking-tight">Live Map</h2>
           <div className="flex items-center space-x-1.5 bg-[var(--surface)] border border-[var(--border-custom)] px-2.5 py-1 rounded-full">
             <span className="w-2 h-2 bg-[#22C55E] rounded-full animate-pulse shrink-0" />
-            <span className="font-mono text-[11px] font-bold text-[#22C55E]">Live</span>
+            <span className="font-mono text-[11px] font-bold text-[#22C55E]">Live SSE</span>
           </div>
         </div>
         <div className="flex items-center space-x-3">
           <button
             id="icon-bell-notification"
             className="p-2 bg-[var(--surface)] border border-[var(--border-custom)] rounded-full hover:bg-[var(--elevated)] text-[var(--text-secondary)] transition-all relative cursor-pointer"
-            onClick={() => addToast('1 warning regarding D14 pending confirmation.', 'warning')}
+            onClick={() => addToast('System status: SSE stream active.', 'info')}
           >
-            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[#DC2626] rounded-full" />
+            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[#22C55E] rounded-full" />
             <Bell className="w-4 h-4" />
           </button>
           <div className="w-8 h-8 rounded-full bg-[#4F8EF7] text-white font-mono text-[11px] font-bold flex items-center justify-center">
@@ -310,13 +233,13 @@ export default function LiveMapPage() {
           <div className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[16px] p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs uppercase font-mono tracking-widest text-[var(--text-muted)] font-semibold block">
-                Sector C-X Grid Reference
+                Central Reading Room Floor Map
               </span>
               <button
-                onClick={() => { setLogs((p) => ['[REFRESH] Grid telemetry updated.', ...p]) }}
+                onClick={() => { setLogs((p) => ['[REFRESH] Live stream synchronized.', ...p]) }}
                 className="text-xs text-[#4F8EF7] hover:underline flex items-center gap-1 cursor-pointer font-sans"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Pulse Sensors
+                <RefreshCw className="w-3.5 h-3.5" /> Sync Telemetry
               </button>
             </div>
             <div id="legend-pills-chips" className="flex items-center overflow-x-auto whitespace-nowrap md:flex-wrap gap-2 pb-1 scrollbar-none">
@@ -342,6 +265,15 @@ export default function LiveMapPage() {
             </div>
           </div>
 
+          {/* No desks available notice (TC02) */}
+          {computedFree === 0 && (
+            <div id="no-desks-available-notice" className="bg-[#EF4444]/10 border border-[#EF4444]/30 rounded-[14px] p-4 text-center">
+              <span className="font-display font-bold text-sm text-[#EF4444]">
+                No desks currently available
+              </span>
+            </div>
+          )}
+
           {/* Node Grid */}
           <NodeGrid desks={desks} selectedDeskId={selectedDeskId} onDeskClick={(id) => { setSelectedDeskId(id); setIsMobilePanelOpen(true) }} />
 
@@ -361,7 +293,7 @@ export default function LiveMapPage() {
               </div>
             </div>
             <div className="text-right shrink-0">
-              <p className="font-sans text-[11px] text-[var(--text-muted)]">Last updated {lastUpdatedTime}s ago</p>
+              <p className="font-sans text-[11px] text-[var(--text-muted)]">Streaming via SSE feed</p>
             </div>
           </div>
 
@@ -477,10 +409,10 @@ export default function LiveMapPage() {
                 <h3 className="font-display font-bold text-lg text-[var(--text-primary)]">Check-In: {scanModalDeskId}</h3>
               </div>
               <p className="text-xs text-[var(--text-secondary)] font-sans leading-relaxed">
-                In the library, you check in by scanning the physical QR code sticker placed on your desk using your mobile phone camera.
+                Scan the rotating QR code displayed on the ESP32 screen on Desk {scanModalDeskId}.
               </p>
               <div className="p-3 bg-[var(--elevated)] border border-[var(--border-custom)] rounded-[12px] text-center">
-                <span className="text-[10px] font-mono text-[var(--text-muted)] uppercase tracking-wider block">Testing / Development Mode</span>
+                <span className="text-[10px] font-mono text-[var(--text-muted)] uppercase tracking-wider block">Simulation / Testing Mode</span>
               </div>
               <div className="flex flex-col gap-2 pt-2 text-xs">
                 <button
@@ -491,7 +423,7 @@ export default function LiveMapPage() {
                   {simulatingScan ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    'Simulate Camera Scan'
+                    'Simulate QR Scan'
                   )}
                 </button>
                 <button

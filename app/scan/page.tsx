@@ -4,7 +4,6 @@ import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, AlertTriangle, Loader2, QrCode, GraduationCap } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/components/providers/auth-provider'
 
 function QrScanContent() {
@@ -26,14 +25,14 @@ function QrScanContent() {
   useEffect(() => {
     const checkSession = async () => {
       if (!user) return
-      const { data } = await supabase
-        .from('sessions')
-        .select('id, desk_id')
-        .eq('student_id', user.id)
-        .in('status', ['ACTIVE', 'AWAY'])
-        .maybeSingle()
-      if (data) {
-        setActiveSession(data)
+      try {
+        const res = await fetch('/api/session')
+        const data = await res.json()
+        if (data.session) {
+          setActiveSession({ id: data.session.session_id, desk_id: data.session.desk_id })
+        }
+      } catch (err: any) {
+        console.error('[Scan Page Error]', err.message)
       }
     }
     checkSession()

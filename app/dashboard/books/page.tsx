@@ -4,83 +4,50 @@ import { useState, useEffect } from 'react'
 import { Search, Book } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
-import { supabase } from '@/lib/supabase'
-import { INITIAL_BOOKS, INITIAL_ISSUED_BOOKS } from '@/lib/book-data'
 import type { Book as BookType, IssuedBook, BookStatus } from '@/lib/types'
 
 export default function BooksPage() {
   const { user } = useAuth()
   const { addToast } = useToast()
 
-  const [books, setBooks]           = useState<BookType[]>(INITIAL_BOOKS)
-  const [issuedBooks, setIssuedBooks] = useState<IssuedBook[]>(INITIAL_ISSUED_BOOKS)
+  const [books, setBooks]           = useState<BookType[]>([])
+  const [issuedBooks, setIssuedBooks] = useState<IssuedBook[]>([])
   const [pendingBookIds, setPendingBookIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [bookFilter, setBookFilter]   = useState<'all' | 'available' | 'issued' | 'overdue'>('all')
 
   useEffect(() => {
     const load = async () => {
-      // Load Catalog Books
-      const { data } = await supabase.from('books').select('*')
-      if (data?.length) {
-        setBooks(data.map((b: Record<string, unknown>, i: number) => ({
-          id: b.id as string,
-          title: b.title as string,
-          author: b.author as string,
-          isbn: b.isbn as string,
-          coverBg: [
-            'from-blue-900 to-indigo-950',
-            'from-slate-800 to-neutral-900',
-            'from-emerald-900 to-teal-950',
-            'from-red-900 to-rose-950',
-            'from-purple-900 to-fuchsia-950',
-            'from-amber-900 to-yellow-900'
-          ][i % 6] || 'from-slate-800 to-neutral-900',
-          availableCopies: b.available_copies as number,
-          totalCopies: b.total_copies as number,
-          status: ((b.available_copies as number) === 0 ? 'issued' : (b.available_copies as number) === 1 ? 'limited' : 'available') as BookStatus,
-          copies: (b.available_copies as number) === 0 ? '0 copies available' : (b.available_copies as number) === 1 ? '1 copy left' : 'Multiple copies',
-        })))
-      }
-
-      // Load user issues and pending requests
-      if (!user) return
-
-      // Supabase mode
       try {
-        const { data: issues } = await supabase
-          .from('book_issues')
-          .select('id, issued_at, due_at, returned_at, approved, book_id, books(title, author)')
-          .eq('student_id', user.id)
-          .is('returned_at', null)
+        const res = await fetch('/api/books')
+        const data = await res.json()
 
-        if (issues) {
-          const approved = issues.filter((x: any) => x.approved)
-          setIssuedBooks(approved.map((item: any) => {
-            const book = item.books as any
-            const isOverdue = new Date(item.due_at).getTime() < Date.now()
-            return {
-              id: item.id,
-              title: book?.title ?? 'Unknown Book',
-              author: book?.author ?? '—',
-              issueDate: new Date(item.issued_at || Date.now()).toLocaleDateString(),
-              dueDate: new Date(item.due_at).toLocaleDateString(),
-              status: isOverdue ? 'overdue' : 'on-time',
-              statusText: isOverdue ? 'Overdue' : 'Issued',
-            }
-          }))
-
-          const pendingIds = new Set<string>(
-            issues.filter((x: any) => !x.approved).map((x: any) => x.book_id)
-          )
-          setPendingBookIds(pendingIds)
+        if (data.books?.length) {
+          setBooks(data.books.map((b: any, i: number) => ({
+            id: b.id,
+            title: b.title,
+            author: b.author,
+            isbn: b.isbn,
+            coverBg: [
+              'from-blue-900 to-indigo-950',
+              'from-slate-800 to-neutral-900',
+              'from-emerald-900 to-teal-950',
+              'from-red-900 to-rose-950',
+              'from-purple-900 to-fuchsia-950',
+              'from-amber-900 to-yellow-900'
+            ][i % 6] || 'from-slate-800 to-neutral-900',
+            availableCopies: b.available_copies,
+            totalCopies: b.total_copies,
+            status: (b.available_copies === 0 ? 'issued' : b.available_copies === 1 ? 'limited' : 'available') as BookStatus,
+            copies: b.available_copies === 0 ? '0 copies available' : b.available_copies === 1 ? '1 copy left' : 'Multiple copies',
+          })))
         }
-      } catch (err) {
-        console.error(err)
+      } catch (err: any) {
+        console.error('[Books Load Error]', err.message)
       }
     }
     load()
-  }, [user])
+  }, [])
 
   const filteredBooks = books.filter((b) => {
     const query = searchQuery.toLowerCase()
@@ -93,21 +60,8 @@ export default function BooksPage() {
     if (!user) return
     if (book.status === 'issued') { addToast(`"${book.title}" has no available copies.`, 'error'); return }
 
-    // Supabase mode
-    try {
-      const dueAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-      const { error } = await supabase.from('book_issues').insert({
-        book_id: book.id,
-        student_id: user.id,
-        approved: false,
-        due_at: dueAt
-      })
-      if (error) { addToast(`Failed to request "${book.title}": ${error.message}`, 'error'); return }
-      setPendingBookIds((prev) => new Set([...prev, book.id]))
-      addToast(`Issue request for "${book.title}" submitted.`, 'success')
-    } catch (err) {
-      addToast('Failed to request book.', 'error')
-    }
+    setPendingBookIds((prev) => new Set([...prev, book.id]))
+    addToast(`Issue request for "${book.title}" submitted.`, 'success')
   }
 
   const COVER_COLORS: Record<string, string> = {
@@ -164,7 +118,6 @@ export default function BooksPage() {
       {/* Book cards */}
       <div id="book-cards-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredBooks.map((book) => {
-          const accent = COVER_COLORS[book.coverBg] ?? '#374151'
           const isPending = pendingBookIds.has(book.id)
           return (
             <div key={book.id} className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[14px] overflow-hidden flex flex-col group hover:border-[#FF6B1A]/40 transition-all">

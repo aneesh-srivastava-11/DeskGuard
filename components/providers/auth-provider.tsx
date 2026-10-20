@@ -1,7 +1,13 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
-import { supabase } from '@/lib/supabase'
+import { auth } from '@/lib/firebase'
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  User as FirebaseUser,
+} from 'firebase/auth'
 import type { AppUser, UserRole } from '@/lib/types'
 
 interface AuthContextValue {
@@ -22,75 +28,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const resolveUser = useCallback(async (supabaseUserId: string, email: string) => {
+  const resolveUser = useCallback(async (fbUser: FirebaseUser) => {
     try {
-      const { data: student, error } = await supabase
-        .from('students')
-        .select('role, name, reg_no')
-        .eq('id', supabaseUserId)
-        .single()
+      const token = await fbUser.getIdToken()
+      // Set session cookie for Middleware & Server Components
+      document.cookie = `fb-token=${token}; path=/; max-age=3600; SameSite=Lax; Secure`
 
-      if (error) {
-        console.error('[DeskGuard]', error.message)
-      }
-
-      const role = student?.role ?? 'student'
-
-      setUser({
-        id: supabaseUserId,
-        email,
-        regNo: student?.reg_no ?? null,
-        name: student?.name ?? email.split('@')[0].replace(/\./g, ' '),
-        role: role as UserRole,
+      // Fetch student details & role from our backend DB
+      const res = await fetch('/api/user/me', {
+        headers: { Authorization: `Bearer ${token}` },
       })
+
+      if (res.ok) {
+        const data = await res.json()
+        setUser({
+          id: fbUser.uid,
+          email: fbUser.email ?? '',
+          regNo: data.regNo ?? null,
+          name: data.name ?? fbUser.email?.split('@')[0].replace(/\./g, ' ') ?? 'User',
+          role: (data.role ?? 'student') as UserRole,
+        })
+      } else {
+        // Fallback user if record not created in DB yet
+        setUser({
+          id: fbUser.uid,
+          email: fbUser.email ?? '',
+          regNo: null,
+          name: fbUser.email?.split('@')[0].replace(/\./g, ' ') ?? 'User',
+          role: 'student',
+        })
+      }
     } catch (err: any) {
-      console.error('[DeskGuard]', err.message)
+      console.error('[DeskGuard Auth]', err.message)
       setUser({
-        id: supabaseUserId,
-        email,
+        id: fbUser.uid,
+        email: fbUser.email ?? '',
         regNo: null,
-        name: email.split('@')[0].replace(/\./g, ' '),
+        name: fbUser.email?.split('@')[0].replace(/\./g, ' ') ?? 'User',
         role: 'student',
       })
     }
   }, [])
 
   useEffect(() => {
-    // Restore session on mount
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=${session.expires_in}; SameSite=Lax; Secure`
-        await resolveUser(session.user.id, session.user.email ?? '')
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        await resolveUser(fbUser)
       } else {
-        document.cookie = `sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure`
+        document.cookie = `fb-token=; path=/; max-age=0; SameSite=Lax; Secure`
         setUser(null)
       }
       setLoading(false)
     })
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=${session.expires_in}; SameSite=Lax; Secure`
-        await resolveUser(session.user.id, session.user.email ?? '')
-      } else {
-        document.cookie = `sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure`
-        setUser(null)
-      }
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
+    return () => unsubscribe()
   }, [resolveUser])
 
   const signIn = async (email: string, password: string): Promise<{ error: string | null }> => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) return { error: error.message }
-    return { error: null }
+    try {
+      await signInWithEmailAndPassword(auth, email, password)
+      return { error: null }
+    } catch (err: any) {
+      return { error: err.message ?? 'Authentication failed' }
+    }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    await firebaseSignOut(auth)
+    document.cookie = `fb-token=; path=/; max-age=0; SameSite=Lax; Secure`
     setUser(null)
   }
 
