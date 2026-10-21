@@ -38,3 +38,33 @@ export function validateInstitutionalEmail(email?: string | null): {
   }
   return { valid: false, role: 'student', domain: '' }
 }
+
+export interface DecodedAuthUser {
+  uid: string
+  email?: string
+  name?: string
+}
+
+/**
+ * Safely decodes a client/server Firebase ID Token (JWT)
+ */
+export function parseJwtPayload(token?: string | null): DecodedAuthUser | null {
+  if (!token) return null
+  try {
+    const parts = token.split('.')
+    if (parts.length === 3) {
+      const payloadStr = Buffer.from(parts[1], 'base64url').toString('utf8')
+      const payload = JSON.parse(payloadStr)
+      return {
+        uid: payload.user_id || payload.sub || payload.uid || '',
+        email: payload.email || undefined,
+        name: payload.name || undefined,
+      }
+    }
+  } catch (err) {}
+
+  return {
+    uid: token,
+    email: token.includes('@') ? token : undefined,
+  }
+}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, CheckCircle2, RefreshCw, QrCode } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, RefreshCw, QrCode, Clock, BookOpen } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
 
@@ -43,7 +43,8 @@ export default function SessionPage() {
       const data = await res.json()
 
       if (!data.session) {
-        router.push('/dashboard')
+        setSessionData(null)
+        setLoading(false)
         return
       }
 
@@ -141,10 +142,50 @@ export default function SessionPage() {
     }
   }
 
-  if (loading || !sessionData) {
+  if (loading) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center">
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3">
         <RefreshCw className="w-8 h-8 text-[#FF6B1A] animate-spin" />
+        <p className="font-mono text-xs text-[var(--text-muted)]">Loading active session...</p>
+      </div>
+    )
+  }
+
+  if (!sessionData) {
+    return (
+      <div className="w-full max-w-[800px] mx-auto space-y-6 py-4">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[var(--border-custom)] h-[52px] px-6">
+          <h2 className="font-display font-bold text-xl text-[var(--text-primary)]">My Desk Session</h2>
+        </div>
+
+        <div className="bg-[var(--surface)] border border-[var(--border-custom)] rounded-[20px] p-10 text-center space-y-6 max-w-lg mx-auto shadow-xl my-8">
+          <div className="w-20 h-20 bg-[#FF6B1A]/10 border border-[#FF6B1A]/30 rounded-full flex items-center justify-center mx-auto text-[#FF6B1A]">
+            <Clock className="w-10 h-10" />
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="font-display font-bold text-2xl text-[var(--text-primary)]">No Active Session</h3>
+            <p className="font-sans text-xs text-[var(--text-secondary)] leading-relaxed max-w-sm mx-auto">
+              You are not currently checked into any study desk. Visit the Live Seat Map to find a vacant seat and scan its QR code to begin your session.
+            </p>
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="w-full sm:w-auto px-6 h-11 bg-[#FF6B1A] hover:bg-[#e05a10] text-black font-mono font-bold text-xs uppercase tracking-wider rounded-[12px] flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md"
+            >
+              <QrCode className="w-4 h-4" /> Browse Live Map
+            </button>
+            <button
+              onClick={() => router.push('/scan')}
+              className="w-full sm:w-auto px-6 h-11 bg-[var(--elevated)] hover:bg-[var(--surface)] text-[var(--text-primary)] border border-[var(--border-custom)] font-mono font-bold text-xs uppercase tracking-wider rounded-[12px] flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              Scan QR Directly
+            </button>
+          </div>
+        </div>
       </div>
     )
   }

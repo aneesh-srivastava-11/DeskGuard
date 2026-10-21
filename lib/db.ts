@@ -254,9 +254,8 @@ export const sql: any = async (strings: TemplateStringsArray, ...values: any[]) 
 
   // 5. SELECT ... FROM "Session"
   if (/FROM\s+"Session"/i.test(rawQuery)) {
-    const studentId = values[0]
     const active = Array.from(memoryStore.sessions.values()).filter(
-      (s) => s.student_id === studentId && (s.status === 'ACTIVE' || s.status === 'AWAY')
+      (s) => (s.status === 'ACTIVE' || s.status === 'AWAY') && (values.length === 0 || values.includes(s.student_id))
     )
     if (active.length > 0) {
       const s = active[0]
@@ -340,7 +339,13 @@ export async function checkinDesk(rawDeskId: string, studentId: string) {
   }
 
   // 4. Create new active session (TC04)
-  const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0
+        const v = c === 'x' ? r : (r & 0x3) | 0x8
+        return v.toString(16)
+      })
   const now = new Date()
   const endTime = new Date(now.getTime() + 3 * 60 * 60 * 1000)
 
@@ -360,6 +365,21 @@ export async function checkinDesk(rawDeskId: string, studentId: string) {
   // Update desk status to occupied
   desk.status = 'occupied'
   desk.updated_at = now.toISOString()
+
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        INSERT INTO "Session" (session_id, student_id, desk_id, start_time, end_time, last_confirmed_at, status)
+        VALUES (${sessionId}, ${studentId}, ${deskId}, ${now.toISOString()}, ${endTime.toISOString()}, ${now.toISOString()}, 'ACTIVE')
+      `
+      await (realNeon as any)`
+        UPDATE "Desk" SET status = 'occupied', updated_at = NOW() WHERE desk_id = ${deskId}
+      `
+    } catch (e: any) {
+      console.warn('[DB] Neon checkin insert warning:', e.message)
+    }
+  }
 
   return {
     success: true,
@@ -386,6 +406,20 @@ export async function releaseDesk(sessionId: string, studentId: string) {
     desk.updated_at = new Date().toISOString()
   }
 
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        UPDATE "Session" SET status = 'RELEASED' WHERE session_id = ${sessionId}
+      `
+      await (realNeon as any)`
+        UPDATE "Desk" SET status = 'free', updated_at = NOW() WHERE desk_id = ${session.desk_id}
+      `
+    } catch (e: any) {
+      console.warn('[DB] releaseDesk Neon update warning:', e.message)
+    }
+  }
+
   return { success: true }
 }
 
@@ -406,6 +440,20 @@ export async function markAway(sessionId: string, studentId: string) {
   if (desk) {
     desk.status = 'away'
     desk.updated_at = new Date().toISOString()
+  }
+
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        UPDATE "Session" SET status = 'AWAY', away_started_at = ${session.away_started_at} WHERE session_id = ${sessionId}
+      `
+      await (realNeon as any)`
+        UPDATE "Desk" SET status = 'away', updated_at = NOW() WHERE desk_id = ${session.desk_id}
+      `
+    } catch (e: any) {
+      console.warn('[DB] markAway Neon update warning:', e.message)
+    }
   }
 
   return {
@@ -435,6 +483,20 @@ export async function librarianReleaseDesk(rawDeskId: string) {
 
   desk.status = 'free'
   desk.updated_at = new Date().toISOString()
+
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        UPDATE "Session" SET status = 'RELEASED' WHERE desk_id = ${deskId} AND status IN ('ACTIVE', 'AWAY')
+      `
+      await (realNeon as any)`
+        UPDATE "Desk" SET status = 'free', updated_at = NOW() WHERE desk_id = ${deskId}
+      `
+    } catch (e: any) {
+      console.warn('[DB] librarianReleaseDesk Neon warning:', e.message)
+    }
+  }
 
   return { success: true, desk_id: deskId, status: 'Available' }
 }

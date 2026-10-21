@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
+import { parseJwtPayload, determineUserRole } from '@/lib/auth-utils'
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,14 +13,26 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
     }
 
-    // In local dev/testing without active Firebase service account, parse token header or decode claims
-    // Query Student table in Neon DB
-    const students = await sql`
-      SELECT student_id, reg_no, name, email, role
-      FROM "Student"
-      WHERE email LIKE ${'%' + token.slice(-8) + '%'} OR student_id = ${token}
-      LIMIT 1
-    `
+    const decoded = parseJwtPayload(token)
+    const email = decoded?.email || ''
+    const uid = decoded?.uid || token
+
+    let students: any[] = []
+    if (email) {
+      students = await sql`
+        SELECT student_id, reg_no, name, email, role
+        FROM "Student"
+        WHERE email = ${email} OR student_id = ${uid} OR student_id = ${email}
+        LIMIT 1
+      `
+    } else {
+      students = await sql`
+        SELECT student_id, reg_no, name, email, role
+        FROM "Student"
+        WHERE student_id = ${uid}
+        LIMIT 1
+      `
+    }
 
     if (students.length > 0) {
       const student = students[0]
@@ -32,11 +45,13 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // Default response for valid authenticated user
+    const fallbackRole = determineUserRole(email)
     return NextResponse.json({
-      role: 'student',
+      id: uid,
+      role: fallbackRole,
       regNo: null,
-      name: 'Library Student',
+      name: decoded?.name || email.split('@')[0] || 'Library Student',
+      email: email,
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })

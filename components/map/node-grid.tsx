@@ -229,13 +229,13 @@ export function InfoPanel({ desk, currentUserId, activeSession, onReserve, onRel
                 <QrCode className="w-4 h-4" /> Scan Reservation
               </button>
             )
-          ) : desk.occupantId === currentUserId ? (
+          ) : (activeSession && activeSession.desk_id === desk.id) || isLibrarian ? (
             <button
               id="btn-self-desk-release"
               onClick={() => onRelease(desk.id)}
               className="w-full h-11 bg-[#EF4444] hover:bg-[#EF4444]/90 text-white font-display font-medium rounded-[12px] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md text-xs uppercase tracking-wider"
             >
-              <LogOut className="w-4 h-4" /> Release Desk ({desk.id})
+              <LogOut className="w-4 h-4" /> {isLibrarian ? `Override & Release Desk (${desk.id})` : `Release Desk (${desk.id})`}
             </button>
           ) : desk.status === 'abandoned' && isLibrarian ? (
             <button

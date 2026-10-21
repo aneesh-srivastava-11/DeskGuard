@@ -182,6 +182,10 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
                   </div>
                 </div>
 
+                <div className="bg-[#FF6B1A]/10 border border-[#FF6B1A]/30 rounded-[8px] p-2.5 text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                  <span className="font-bold text-[#FF6B1A]">Default Password:</span> Account will be provisioned with default password <span className="font-mono font-bold text-[var(--text-primary)]">DeskGuard@2026</span>. The user can change this anytime from their profile.
+                </div>
+
                 {formFeedback && (
                   <div
                     className={`p-3 rounded-[10px] text-xs flex items-center gap-2 ${

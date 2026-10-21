@@ -141,6 +141,25 @@ export default function LiveMapPage() {
   }
 
   const handleRelease = async (deskId: string) => {
+    if (isLibrarian) {
+      try {
+        const res = await fetch('/api/admin/desk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'release', deskId }),
+        })
+        const result = await res.json()
+        if (result.error) throw new Error(result.error)
+
+        setLogs((prev) => [`[LIBRARIAN RELEASE] Desk ${deskId} released by librarian override.`, ...prev])
+        addToast(`Desk ${deskId} released successfully.`, 'success')
+      } catch (err: any) {
+        console.error(err)
+        addToast(`Release failed: ${err.message}`, 'error')
+      }
+      return
+    }
+
     if (!activeSession) return
     try {
       const res = await fetch('/api/session/release', {
@@ -378,10 +397,10 @@ export default function LiveMapPage() {
                         <QrCode className="w-4 h-4" /> Scan Reservation
                       </button>
                     )
-                  ) : selectedDesk.occupantId === user?.regNo ? (
+                  ) : (activeSession && activeSession.desk_id === selectedDesk.id) || isLibrarian ? (
                     <button onClick={() => { handleRelease(selectedDesk.id); setIsMobilePanelOpen(false) }}
                       className="w-full h-11 bg-[#EF4444] text-white font-display font-medium rounded-[12px] flex items-center justify-center gap-2 cursor-pointer text-xs uppercase shadow-md">
-                      <LogOut className="w-4 h-4" /> Release Desk ({selectedDesk.id})
+                      <LogOut className="w-4 h-4" /> {isLibrarian ? `Override & Release (${selectedDesk.id})` : `Release My Desk (${selectedDesk.id})`}
                     </button>
                   ) : selectedDesk.status === 'abandoned' && isLibrarian ? (
                     <button onClick={() => { handleSweep(selectedDesk.id); setIsMobilePanelOpen(false) }}

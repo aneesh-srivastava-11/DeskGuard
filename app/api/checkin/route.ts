@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyQRToken } from '@/lib/crypto-utils'
 import { checkinDesk, sql } from '@/lib/db'
-import { cookies } from 'next/headers'
+import { parseJwtPayload } from '@/lib/auth-utils'
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,24 +28,30 @@ export async function POST(req: NextRequest) {
 
     // Determine student ID
     let studentId = reqStudentId
+    let studentEmail = ''
     if (!studentId) {
+      const decoded = parseJwtPayload(token)
+      studentEmail = decoded?.email || ''
+      const uid = decoded?.uid || token.slice(0, 28)
+
       const studentResult = await sql`
         SELECT student_id FROM "Student"
-        WHERE email LIKE ${'%' + token.slice(-8) + '%'} OR student_id = ${token}
+        WHERE email = ${studentEmail} OR student_id = ${uid} OR student_id = ${token}
         LIMIT 1
       `
-      studentId = studentResult.length > 0 ? studentResult[0].student_id : token
+      studentId = studentResult.length > 0 ? studentResult[0].student_id : (uid.length > 64 ? uid.slice(0, 64) : uid)
     }
 
     // Ensure student record exists in Student table
+    const safeStudentId = studentId.slice(0, 64)
     await sql`
       INSERT INTO "Student" (student_id, reg_no, name, email, role)
-      VALUES (${studentId}, ${'REG-' + studentId.slice(0, 6)}, 'Student', ${studentId + '@student.muj.edu'}, 'student')
+      VALUES (${safeStudentId}, ${'REG-' + safeStudentId.slice(0, 6)}, 'Student', ${studentEmail || safeStudentId + '@student.muj.edu'}, 'student')
       ON CONFLICT (student_id) DO NOTHING
     `
 
     // Execute check-in or away return via Neon DB helper
-    const result = await checkinDesk(deskId, studentId)
+    const result = await checkinDesk(deskId, safeStudentId)
 
     if (result.error === 'already_checked_in') {
       return NextResponse.json({
@@ -61,11 +67,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      desk_id: deskId,
+      student_id: safeStudentId,
       mode: result.mode,
       session: result.session,
     })
   } catch (error: any) {
-    console.error('[Checkin Route Error]', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

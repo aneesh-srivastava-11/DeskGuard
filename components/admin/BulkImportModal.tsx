@@ -187,6 +187,10 @@ Anand Joshi,anand.joshi@jaipur.manipal.edu,LIB-002,librarian,Library Staff,2023`
             </div>
           </div>
 
+          <div className="bg-[#FF6B1A]/10 border border-[#FF6B1A]/30 rounded-[8px] p-2.5 text-[11px] text-[var(--text-secondary)] leading-relaxed">
+            <span className="font-bold text-[#FF6B1A]">Default Password:</span> All imported accounts will be provisioned in Firebase Auth with default password <span className="font-mono font-bold text-[var(--text-primary)]">DeskGuard@2026</span>. Users can change this anytime from their profile.
+          </div>
+
           {/* Or Paste CSV */}
           <div className="space-y-1.5">
             <label className="block text-xs font-mono font-bold text-[var(--text-secondary)] uppercase tracking-wider">

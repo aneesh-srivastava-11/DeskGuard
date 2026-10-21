@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createOrUpdateUser, bulkImportUsers, listUsers, type UserInput } from '@/lib/db'
+import { provisionFirebaseAuthUser } from '@/lib/firebase-admin'
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,9 +23,15 @@ export async function POST(req: NextRequest) {
     // Bulk Import Mode
     if (body.users && Array.isArray(body.users)) {
       const result = await bulkImportUsers(body.users as UserInput[])
-      if (result.error) {
-        return NextResponse.json({ error: result.error }, { status: 400 })
+      // Provision Firebase Auth accounts with default password DeskGuard@2026
+      if (process.env.NODE_ENV !== 'test') {
+        Promise.all(
+          body.users.map((u: any) =>
+            u.email ? provisionFirebaseAuthUser(u.email, u.name).catch(() => {}) : Promise.resolve()
+          )
+        ).catch(() => {})
       }
+
       return NextResponse.json(result, { status: 200 })
     }
 
@@ -48,7 +55,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 400 })
     }
 
-    return NextResponse.json(result, { status: 201 })
+    // Provision Firebase Auth account with default password DeskGuard@2026
+    let authProvision = null
+    if (process.env.NODE_ENV !== 'test') {
+      authProvision = await provisionFirebaseAuthUser(userPayload.email, userPayload.name)
+    }
+
+    return NextResponse.json({ ...result, authProvision }, { status: 201 })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to process user creation' }, { status: 500 })
   }
