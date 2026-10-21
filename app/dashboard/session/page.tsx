@@ -6,11 +6,25 @@ import { AlertTriangle, CheckCircle2, RefreshCw, QrCode, Clock, BookOpen } from 
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
 
-function formatElapsedTime(totalSecs: number) {
-  const hrs  = Math.floor(totalSecs / 3600)
-  const mins = Math.floor((totalSecs % 3600) / 60)
-  const secs = totalSecs % 60
-  return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+function formatTimerHHMMSS(totalSecs: number): string {
+  const safe = Math.max(0, Math.floor(isNaN(totalSecs) ? 0 : totalSecs))
+  const hrs  = Math.floor(safe / 3600)
+  const mins = Math.floor((safe % 3600) / 60)
+  const secs = safe % 60
+  return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+function formatTimerMMSS(totalSecs: number): string {
+  const safe = Math.max(0, Math.floor(isNaN(totalSecs) ? 0 : totalSecs))
+  const mins = Math.floor(safe / 60)
+  const secs = safe % 60
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+function parseSafeStartTime(dateStr: any): number {
+  if (!dateStr) return Date.now()
+  const parsed = new Date(dateStr).getTime()
+  return isNaN(parsed) ? Date.now() : parsed
 }
 
 export default function SessionPage() {
@@ -23,12 +37,13 @@ export default function SessionPage() {
   
   // Settings constants
   const sessionLimitHours = 3
+  const capSeconds = sessionLimitHours * 3600
   const awayLimitMinutes = 30
+  const awayCapSeconds = awayLimitMinutes * 60
 
-  // Timer states
+  // Timer states (clamped, standard)
   const [timerSeconds, setTimerSeconds]       = useState(0)
-  const [awayMinutesLeft, setAwayMinutesLeft] = useState(30)
-  const [awaySecondsLeft, setAwaySecondsLeft] = useState(0)
+  const [awaySecondsLeft, setAwaySecondsLeft] = useState(awayCapSeconds)
 
   // Presence / away states
   const [presenceAlertActive, setPresenceAlertActive] = useState(false)
@@ -51,15 +66,18 @@ export default function SessionPage() {
       setSessionData(data.session)
       setAwayModeActive(data.session.status === 'AWAY')
 
-      // Calculate initial timers
-      const elapsed = Math.floor((Date.now() - new Date(data.session.start_time).getTime()) / 1000)
-      setTimerSeconds(elapsed)
+      // Calculate safe initial timers
+      const startTime = parseSafeStartTime(data.session.start_time)
+      const now = Date.now()
+      const rawElapsed = Math.floor((now - startTime) / 1000)
+      const safeElapsed = Math.min(capSeconds, Math.max(0, rawElapsed))
+      setTimerSeconds(safeElapsed)
 
       if (data.session.status === 'AWAY' && data.session.away_started_at) {
-        const elapsedAway = Math.floor((Date.now() - new Date(data.session.away_started_at).getTime()) / 1000)
-        const remainingAway = Math.max(0, (awayLimitMinutes * 60) - elapsedAway)
-        setAwayMinutesLeft(Math.floor(remainingAway / 60))
-        setAwaySecondsLeft(remainingAway % 60)
+        const awayStart = parseSafeStartTime(data.session.away_started_at)
+        const elapsedAway = Math.floor((now - awayStart) / 1000)
+        const remainingAway = Math.max(0, awayCapSeconds - elapsedAway)
+        setAwaySecondsLeft(remainingAway)
       }
     } catch (err: any) {
       console.error('[DeskGuard Session]', err.message)
@@ -77,14 +95,17 @@ export default function SessionPage() {
     if (!sessionData) return
 
     const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - new Date(sessionData.start_time).getTime()) / 1000)
-      setTimerSeconds(elapsed)
+      const startTime = parseSafeStartTime(sessionData.start_time)
+      const now = Date.now()
+      const rawElapsed = Math.floor((now - startTime) / 1000)
+      const safeElapsed = Math.min(capSeconds, Math.max(0, rawElapsed))
+      setTimerSeconds(safeElapsed)
 
       if (awayModeActive && sessionData.away_started_at) {
-        const elapsedAway = Math.floor((Date.now() - new Date(sessionData.away_started_at).getTime()) / 1000)
-        const remainingAway = Math.max(0, (awayLimitMinutes * 60) - elapsedAway)
-        setAwayMinutesLeft(Math.floor(remainingAway / 60))
-        setAwaySecondsLeft(remainingAway % 60)
+        const awayStart = parseSafeStartTime(sessionData.away_started_at)
+        const elapsedAway = Math.floor((now - awayStart) / 1000)
+        const remainingAway = Math.max(0, awayCapSeconds - elapsedAway)
+        setAwaySecondsLeft(remainingAway)
       }
     }, 1000)
 
@@ -194,7 +215,6 @@ export default function SessionPage() {
   const checkedInTimeStr = checkedInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const expiresAtTime = new Date(checkedInTime.getTime() + sessionLimitHours * 3600 * 1000)
   const expiresAtTimeStr = expiresAtTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const capSeconds = sessionLimitHours * 3600
 
   return (
     <div className="w-full max-w-[800px] mx-auto space-y-6 py-4">
@@ -254,10 +274,10 @@ export default function SessionPage() {
                 strokeLinecap="round" />
             </svg>
             <div className="text-center z-10 flex flex-col items-center justify-center">
-              <span className="font-display font-bold text-[24px] md:text-[32px] text-[#FF6B1A] tracking-tighter leading-none">
-                {formatElapsedTime(timerSeconds)}
+              <span className="font-display font-bold text-[26px] md:text-[32px] text-[#FF6B1A] tracking-wider leading-none font-mono">
+                {formatTimerHHMMSS(Math.max(0, capSeconds - timerSeconds))}
               </span>
-              <span className="font-sans text-[10px] md:text-[12px] text-[#6B7280] uppercase tracking-widest mt-2 font-semibold">Session time</span>
+              <span className="font-sans text-[10px] md:text-[11px] text-[#6B7280] uppercase tracking-widest mt-2 font-semibold">Remaining time</span>
             </div>
           </div>
           <p className="font-sans text-[12px] text-[#6B7280] font-medium mt-6 uppercase tracking-wider">Expires at {expiresAtTimeStr}</p>
@@ -268,7 +288,7 @@ export default function SessionPage() {
           <div className="bg-[#1C1C26] border border-[#2A2A38] rounded-[12px] md:rounded-full px-4 md:px-6 py-3 md:py-2.5 flex flex-col md:flex-row items-center gap-2 md:space-x-4 text-xs select-none w-full md:w-auto text-center justify-center">
             <span className="font-sans text-[#6B7280] font-medium">Checked in {checkedInTimeStr}</span>
             <span className="hidden md:inline text-[#2A2A38] font-bold">|</span>
-            <span className="font-sans text-[#6B7280] font-medium">{sessionLimitHours}h cap · {Math.max(0, Math.floor((capSeconds - timerSeconds) / 60))}m left</span>
+            <span className="font-sans text-[#6B7280] font-medium">{sessionLimitHours}h cap · Elapsed {formatTimerHHMMSS(timerSeconds)}</span>
           </div>
         </div>
 
@@ -304,12 +324,12 @@ export default function SessionPage() {
                 <circle cx="100" cy="100" r="88" stroke="#2A2A38" strokeWidth="8" fill="transparent" />
                 <circle cx="100" cy="100" r="88" stroke="#F59E0B" strokeWidth="8" fill="transparent"
                   strokeDasharray={2 * Math.PI * 88}
-                  strokeDashoffset={(2 * Math.PI * 88) * (1 - ((awayMinutesLeft * 60 + awaySecondsLeft) / (awayLimitMinutes * 60)))}
+                  strokeDashoffset={(2 * Math.PI * 88) * (1 - Math.min(1, Math.max(0, awaySecondsLeft / awayCapSeconds)))}
                   strokeLinecap="round" />
               </svg>
               <div className="text-center z-10 flex flex-col items-center justify-center">
-                <span className="font-display font-bold text-[24px] md:text-[32px] text-[#F59E0B] tracking-tighter leading-none animate-pulse">
-                  {awayMinutesLeft}:{awaySecondsLeft.toString().padStart(2, '0')}
+                <span className="font-display font-bold text-[28px] md:text-[34px] text-[#F59E0B] tracking-wider leading-none animate-pulse font-mono">
+                  {formatTimerMMSS(awaySecondsLeft)}
                 </span>
                 <span className="font-sans text-[10px] text-slate-400 uppercase tracking-wider mt-2 font-bold max-w-[130px]">Away time remaining</span>
               </div>

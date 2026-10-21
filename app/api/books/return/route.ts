@@ -3,13 +3,25 @@ import { returnBook } from '@/lib/db'
 
 export async function POST(req: NextRequest) {
   try {
-    const { loanId, returnDate, finePerDay } = await req.json()
+    const { loanId, isbn, returnDate, finePerDay } = await req.json()
 
-    if (!loanId) {
-      return NextResponse.json({ error: 'missing_params', message: 'loanId is required' }, { status: 400 })
+    let targetLoanId = loanId
+    if (!targetLoanId && isbn) {
+      const { listActiveLoans } = await import('@/lib/db')
+      const activeLoans = await listActiveLoans()
+      const match = activeLoans.find(
+        (l) => l.isbn === isbn || l.book_id === isbn || l.title.toLowerCase() === isbn.toLowerCase()
+      )
+      if (match) {
+        targetLoanId = match.loan_id
+      }
     }
 
-    const result = await returnBook(loanId, returnDate, finePerDay)
+    if (!targetLoanId) {
+      return NextResponse.json({ error: 'missing_params', message: 'loanId or valid ISBN with active loan is required' }, { status: 400 })
+    }
+
+    const result = await returnBook(targetLoanId, returnDate, finePerDay)
 
     if (result.error) {
       return NextResponse.json({ error: result.error, message: result.message }, { status: 400 })

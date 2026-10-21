@@ -33,10 +33,10 @@ export default function LibrarianDashboardPage() {
             row: d.row,
             seat: d.seat,
             status: (d.status ?? 'free').toLowerCase() as Desk['status'],
-            occupiedSince: null,
-            durationText: null,
-            occupantId: null,
-            occupantName: null,
+            occupiedSince: d.occupiedSince,
+            durationText: d.durationText,
+            occupantId: d.occupantRegNo || d.occupantId || d.occupantEmail || null,
+            occupantName: d.occupantName || null,
             hasPower: Boolean(d.hasPower),
             isWindow: Boolean(d.isWindow),
           })))
@@ -51,14 +51,56 @@ export default function LibrarianDashboardPage() {
     }
   }, [])
 
+  // Poll pending book requests for notifications badge
+  useEffect(() => {
+    const fetchRequests = async () => {
+      try {
+        const res = await fetch('/api/books/requests?status=PENDING')
+        const data = await res.json()
+        if (data.requests) {
+          setPendingCount(data.requests.length)
+        }
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    fetchRequests()
+    const t = setInterval(fetchRequests, 8000)
+    return () => clearInterval(t)
+  }, [])
+
   const handleReset = async (deskId: string) => {
-    setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: 'free', occupantId: null } : d))
-    addToast(`Desk ${deskId} reset — returned to free pool.`, 'success')
+    try {
+      const res = await fetch('/api/admin/desk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release', deskId }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
+
+      setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: 'free', occupantId: null, occupantName: null } : d))
+      addToast(`Desk ${deskId} released and reset to available.`, 'success')
+    } catch (err: any) {
+      addToast(`Reset failed: ${err.message}`, 'error')
+    }
   }
 
   const handleSetMaintenance = async (deskId: string, enable: boolean) => {
-    setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: enable ? 'maintenance' : 'free', occupantId: null } : d))
-    addToast(`Desk ${deskId} status updated to ${enable ? 'Maintenance' : 'Normal'}.`, 'success')
+    try {
+      const res = await fetch('/api/admin/desk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'maintenance', deskId, isMaintenance: enable }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
+
+      setDesks((prev) => prev.map((d) => d.id === deskId ? { ...d, status: enable ? 'maintenance' : 'free' } : d))
+      addToast(`Desk ${deskId} status updated to ${enable ? 'Maintenance' : 'Normal'}.`, 'success')
+    } catch (err: any) {
+      addToast(`Maintenance toggle failed: ${err.message}`, 'error')
+    }
   }
 
   const handleViewQr = async (deskId: string) => {
@@ -262,7 +304,16 @@ export default function LibrarianDashboardPage() {
                         {desk.status}
                       </span>
                     </td>
-                    <td className="px-5 py-3 font-mono text-[var(--text-secondary)] hidden sm:table-cell">{desk.occupantId ?? '—'}</td>
+                    <td className="px-5 py-3 font-mono text-[var(--text-secondary)] hidden sm:table-cell">
+                      {desk.occupantName ? (
+                        <div>
+                          <span className="font-sans font-bold text-[var(--text-primary)] block text-xs">{desk.occupantName}</span>
+                          <span className="text-[10px] text-[#FF6B1A] font-semibold">{desk.occupantId}</span>
+                        </div>
+                      ) : (
+                        <span>{desk.occupantId ?? '—'}</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3 text-right space-x-2">
                       <button onClick={() => handleViewQr(desk.id)}
                         className="px-2.5 py-1 text-[10px] font-bold text-[#FF6B1A] border border-[#FF6B1A]/30 rounded-[6px] hover:bg-[#FF6B1A]/10 cursor-pointer">

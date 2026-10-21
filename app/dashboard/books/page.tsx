@@ -42,6 +42,34 @@ export default function BooksPage() {
             copies: b.available_copies === 0 ? '0 copies available' : b.available_copies === 1 ? '1 copy left' : 'Multiple copies',
           })))
         }
+
+        // Load active loans
+        const loansRes = await fetch('/api/books/requests?type=loans')
+        const loansData = await loansRes.json()
+        if (loansData.loans?.length) {
+          setIssuedBooks(loansData.loans.map((l: any) => {
+            const isOverdue = new Date(l.due_date).getTime() < Date.now()
+            return {
+              id: l.loan_id,
+              title: l.title,
+              author: l.author || 'Author',
+              isbn: l.isbn,
+              issueDate: new Date(l.issue_date).toLocaleDateString(),
+              dueDate: new Date(l.due_date).toLocaleDateString(),
+              daysLeft: Math.ceil((new Date(l.due_date).getTime() - Date.now()) / 86400000),
+              status: isOverdue ? 'overdue' : 'active',
+              statusText: isOverdue ? 'Overdue' : 'Active Loan',
+            }
+          }))
+        }
+
+        // Load pending requests
+        const reqRes = await fetch('/api/books/requests?status=PENDING')
+        const reqData = await reqRes.json()
+        if (reqData.requests?.length) {
+          const ids = new Set<string>(reqData.requests.map((r: any) => r.book_id))
+          setPendingBookIds(ids)
+        }
       } catch (err: any) {
         console.error('[Books Load Error]', err.message)
       }
@@ -60,8 +88,20 @@ export default function BooksPage() {
     if (!user) return
     if (book.status === 'issued') { addToast(`"${book.title}" has no available copies.`, 'error'); return }
 
-    setPendingBookIds((prev) => new Set([...prev, book.id]))
-    addToast(`Issue request for "${book.title}" submitted.`, 'success')
+    try {
+      const res = await fetch('/api/books/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: book.id }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
+
+      setPendingBookIds((prev) => new Set([...prev, book.id]))
+      addToast(`Issue request for "${book.title}" submitted to librarian!`, 'success')
+    } catch (err: any) {
+      addToast(`Request failed: ${err.message}`, 'error')
+    }
   }
 
   const COVER_COLORS: Record<string, string> = {

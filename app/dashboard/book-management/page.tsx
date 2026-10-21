@@ -26,11 +26,44 @@ export default function BookManagementPage() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/books')
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
+      // 1. Fetch pending requests
+      const reqRes = await fetch('/api/books/requests?status=PENDING')
+      const reqData = await reqRes.json()
+      if (reqData.requests) {
+        setPendingRequests(reqData.requests.map((r: any) => ({
+          id: r.request_id,
+          bookId: r.book_id,
+          bookTitle: r.book_title,
+          bookIsbn: r.book_isbn,
+          studentId: r.student_id,
+          studentReg: r.student_reg,
+          requestedAt: new Date(r.requested_at).toLocaleDateString(),
+        })))
+      }
+
+      // 2. Fetch active and overdue loans
+      const loansRes = await fetch('/api/books/requests?type=loans')
+      const loansData = await loansRes.json()
+      if (loansData.loans) {
+        setOverdueBooks(loansData.loans.map((l: any) => {
+          const diffDays = Math.ceil((new Date(l.due_date).getTime() - Date.now()) / 86400000)
+          return {
+            id: l.loan_id,
+            title: l.title,
+            isbn: l.isbn,
+            issuedToReg: l.student_reg,
+            issuedToName: l.student_name,
+            dueDate: new Date(l.due_date).toLocaleDateString(),
+            daysOverdue: diffDays < 0 ? Math.abs(diffDays) : 0,
+            fineAccrued: diffDays < 0 ? Math.abs(diffDays) * 2 : 0,
+            reminderSent: false,
+            isSending: false,
+          }
+        }))
+      }
     } catch (e: any) {
       console.error(e)
+      addToast('Failed to load book data', 'error')
     } finally {
       setLoading(false)
     }
@@ -41,26 +74,65 @@ export default function BookManagementPage() {
   }, [])
 
   const handleApproveRequest = async (req: PendingRequest) => {
-    addToast(`Approved request for "${req.bookTitle}"!`, 'success')
+    try {
+      const res = await fetch('/api/books/requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: req.id, action: 'approve' }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
+
+      setPendingRequests((prev) => prev.filter((r) => r.id !== req.id))
+      addToast(`Approved request for "${req.bookTitle}"! Book issued.`, 'success')
+      loadData()
+    } catch (err: any) {
+      addToast(`Approval failed: ${err.message}`, 'error')
+    }
   }
 
   const handleRejectRequest = async (req: PendingRequest) => {
-    setPendingRequests((prev) => prev.filter((r) => r.id !== req.id))
-    addToast(`Rejected request for "${req.bookTitle}".`, 'info')
+    try {
+      const res = await fetch('/api/books/requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: req.id, action: 'reject' }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.error)
+
+      setPendingRequests((prev) => prev.filter((r) => r.id !== req.id))
+      addToast(`Rejected request for "${req.bookTitle}".`, 'info')
+    } catch (err: any) {
+      addToast(`Rejection failed: ${err.message}`, 'error')
+    }
   }
 
   const handleMarkReturned = async () => {
-    if (!libReturnIsbn) { addToast('Please enter a valid ISBN.', 'error'); return }
-    setLibReturnIsbn('')
-    addToast(`Book returned and re-shelved!`, 'success')
+    if (!libReturnIsbn) { addToast('Please enter a valid ISBN or Loan ID.', 'error'); return }
+    try {
+      const res = await fetch('/api/books/return', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isbn: libReturnIsbn.trim() }),
+      })
+      const result = await res.json()
+      if (result.error) throw new Error(result.message || result.error)
+
+      setLibReturnIsbn('')
+      addToast(`Book ${result.loan_id ? `(${result.loan_id})` : ''} returned and re-shelved!`, 'success')
+      loadData()
+    } catch (err: any) {
+      addToast(`Return failed: ${err.message}`, 'error')
+    }
   }
 
   const handleSendReminder = (itemId: string, title: string, reg: string) => {
     setOverdueBooks((prev) => prev.map((b) => b.id === itemId ? { ...b, isSending: true } : b))
     setTimeout(() => {
       setOverdueBooks((prev) => prev.map((b) => b.id === itemId ? { ...b, isSending: false, reminderSent: true } : b))
-      addToast(`Reminder sent to ${reg} for "${title}".`, 'success')
-    }, 800)
+      addToast(`Reminder notification sent to ${reg} for "${title}".`, 'success')
+    }, 600)
   }
 
   return (

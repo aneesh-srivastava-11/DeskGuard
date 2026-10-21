@@ -197,6 +197,12 @@ export function InfoPanel({ desk, currentUserId, activeSession, onReserve, onRel
                 <span className="text-[var(--text-secondary)]">OCCUPIED BY:</span>
                 <span className="text-[#FF6B1A] font-bold">{desk.occupantId ?? '—'}</span>
               </div>
+              {desk.occupantName && (
+                <div className="pt-1 flex justify-between font-mono text-[10px]">
+                  <span className="text-[var(--text-secondary)]">STUDENT NAME:</span>
+                  <span className="text-[var(--text-primary)] font-semibold">{desk.occupantName}</span>
+                </div>
+              )}
             </div>
           </div>
         ) : (

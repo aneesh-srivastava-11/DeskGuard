@@ -55,6 +55,18 @@ export interface DBBookLoan {
   fine: number
 }
 
+export interface DBBookRequest {
+  request_id: string
+  book_id: string
+  student_id: string
+  student_name: string
+  student_reg: string
+  book_title: string
+  book_isbn: string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  requested_at: string
+}
+
 // ─── In-Memory Store for Standalone / Testing / Offline Operation ─────────────
 
 export interface MemoryStore {
@@ -63,6 +75,7 @@ export interface MemoryStore {
   sessions: Map<string, DBSession>
   books: Map<string, DBBook>
   bookLoans: Map<string, DBBookLoan>
+  bookRequests: Map<string, DBBookRequest>
 }
 
 function initMemoryStore(): MemoryStore {
@@ -71,16 +84,19 @@ function initMemoryStore(): MemoryStore {
   const sessions = new Map<string, DBSession>()
   const books = new Map<string, DBBook>()
   const bookLoans = new Map<string, DBBookLoan>()
+  const bookRequests = new Map<string, DBBookRequest>()
 
-  // Default student from pp.pdf
-  students.set('MUJ2024CSE0086', {
-    student_id: 'MUJ2024CSE0086',
-    reg_no: 'MUJ2024CSE0086',
-    name: 'Student Candidate',
-    email: 'MUJ2024CSE0086@muj.manipal.edu',
-    role: 'student',
-    created_at: new Date().toISOString(),
-  })
+  // Only seed default test student in automated test runner (NODE_ENV === 'test')
+  if (process.env.NODE_ENV === 'test') {
+    students.set('MUJ2024CSE0086', {
+      student_id: 'MUJ2024CSE0086',
+      reg_no: 'MUJ2024CSE0086',
+      name: 'Student Candidate',
+      email: 'MUJ2024CSE0086@muj.manipal.edu',
+      role: 'student',
+      created_at: new Date().toISOString(),
+    })
+  }
 
   // Desks D01 - D40
   const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
@@ -144,7 +160,7 @@ function initMemoryStore(): MemoryStore {
     fine: 0,
   })
 
-  return { students, desks, sessions, books, bookLoans }
+  return { students, desks, sessions, books, bookLoans, bookRequests }
 }
 
 let memoryStore = initMemoryStore()
@@ -227,16 +243,38 @@ export const sql: any = async (strings: TemplateStringsArray, ...values: any[]) 
       const desk = memoryStore.desks.get(norm) || memoryStore.desks.get(deskIdVal)
       return desk ? [desk] : []
     }
-    return Array.from(memoryStore.desks.values()).map((d) => ({
-      id: d.desk_id,
-      row: d.row_label,
-      seat: d.seat_number,
-      status: d.status,
-      hasPower: d.has_power,
-      isWindow: d.is_window,
-      location: d.location,
-      updated_at: d.updated_at,
-    }))
+    return Array.from(memoryStore.desks.values()).map((d) => {
+      let activeSess: DBSession | undefined
+      for (const s of memoryStore.sessions.values()) {
+        if (s.desk_id === d.desk_id && (s.status === 'ACTIVE' || s.status === 'AWAY')) {
+          activeSess = s
+          break
+        }
+      }
+      const st = activeSess ? memoryStore.students.get(activeSess.student_id) : undefined
+      const effectiveStatus = d.status === 'maintenance'
+        ? 'maintenance'
+        : activeSess
+          ? (activeSess.status.toLowerCase() as any)
+          : d.status
+
+      return {
+        id: d.desk_id,
+        row: d.row_label,
+        seat: d.seat_number,
+        status: effectiveStatus,
+        hasPower: d.has_power,
+        isWindow: d.is_window,
+        location: d.location,
+        updated_at: d.updated_at,
+        sessionId: activeSess?.session_id || null,
+        occupantId: activeSess?.student_id || null,
+        occupantName: st?.name || null,
+        occupantRegNo: st?.reg_no || null,
+        occupantEmail: st?.email || null,
+        occupiedSince: activeSess?.start_time || null,
+      }
+    })
   }
 
   // 4. SELECT ... FROM "Book"
@@ -869,9 +907,42 @@ export async function bulkImportUsers(inputs: UserInput[]) {
 }
 
 /**
- * Retrieves list of users with optional search query & role filter
+ * Retrieves list of users with optional search query & role filter.
+ * In live environments, queries real registered users from Neon PostgreSQL.
  */
 export async function listUsers(filter?: { search?: string; role?: string; limit?: number }) {
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      const rows = await (realNeon as any)`
+        SELECT student_id, reg_no, name, email, role, created_at
+        FROM "Student"
+        ORDER BY created_at DESC
+      `
+      if (rows && rows.length > 0) {
+        let list = rows
+        if (filter?.role) {
+          list = list.filter((u: any) => u.role === filter.role)
+        }
+        if (filter?.search) {
+          const q = filter.search.toLowerCase().trim()
+          list = list.filter(
+            (u: any) =>
+              (u.name && u.name.toLowerCase().includes(q)) ||
+              (u.email && u.email.toLowerCase().includes(q)) ||
+              (u.reg_no && u.reg_no.toLowerCase().includes(q))
+          )
+        }
+        return {
+          success: true,
+          count: list.length,
+          users: list.slice(0, filter?.limit || 100),
+        }
+      }
+    } catch (e: any) {
+      console.warn('[DB] listUsers Neon query warning:', e.message)
+    }
+  }
+
   let list = Array.from(memoryStore.students.values())
 
   if (filter?.role) {
@@ -894,4 +965,163 @@ export async function listUsers(filter?: { search?: string; role?: string; limit
     count: list.length,
     users: list.slice(0, limit),
   }
+}
+
+/**
+ * Creates a student request to borrow a library book
+ */
+export async function createBookRequest(studentId: string, bookId: string) {
+  let targetBook: DBBook | null = null
+  for (const b of memoryStore.books.values()) {
+    if (b.book_id === bookId || b.isbn === bookId || b.title.toLowerCase() === bookId.toLowerCase()) {
+      targetBook = b
+      break
+    }
+  }
+
+  const student = memoryStore.students.get(studentId)
+  const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `req-${Date.now()}`
+
+  const newReq: DBBookRequest = {
+    request_id: requestId,
+    book_id: targetBook ? targetBook.book_id : bookId,
+    student_id: studentId,
+    student_name: student?.name || 'Student',
+    student_reg: student?.reg_no || studentId,
+    book_title: targetBook?.title || 'Library Book',
+    book_isbn: targetBook?.isbn || 'N/A',
+    status: 'PENDING',
+    requested_at: new Date().toISOString(),
+  }
+
+  memoryStore.bookRequests.set(requestId, newReq)
+
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        CREATE TABLE IF NOT EXISTS "BookRequest" (
+          request_id VARCHAR(64) PRIMARY KEY,
+          book_id VARCHAR(64) NOT NULL,
+          student_id VARCHAR(64) NOT NULL,
+          student_name VARCHAR(100) NOT NULL,
+          student_reg VARCHAR(50) NOT NULL,
+          book_title VARCHAR(255) NOT NULL,
+          book_isbn VARCHAR(50) NOT NULL,
+          status VARCHAR(20) DEFAULT 'PENDING',
+          requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+      `
+      await (realNeon as any)`
+        INSERT INTO "BookRequest" (request_id, book_id, student_id, student_name, student_reg, book_title, book_isbn, status, requested_at)
+        VALUES (${requestId}, ${newReq.book_id}, ${studentId}, ${newReq.student_name}, ${newReq.student_reg}, ${newReq.book_title}, ${newReq.book_isbn}, 'PENDING', NOW())
+      `
+    } catch (e: any) {
+      console.warn('[DB] createBookRequest Neon insert warning:', e.message)
+    }
+  }
+
+  return { success: true, request: newReq }
+}
+
+/**
+ * Retrieves all book issue requests
+ */
+export async function getBookRequests(filter?: { studentId?: string; status?: string }) {
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        CREATE TABLE IF NOT EXISTS "BookRequest" (
+          request_id VARCHAR(64) PRIMARY KEY,
+          book_id VARCHAR(64) NOT NULL,
+          student_id VARCHAR(64) NOT NULL,
+          student_name VARCHAR(100) NOT NULL,
+          student_reg VARCHAR(50) NOT NULL,
+          book_title VARCHAR(255) NOT NULL,
+          book_isbn VARCHAR(50) NOT NULL,
+          status VARCHAR(20) DEFAULT 'PENDING',
+          requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+      `
+      const rows = await (realNeon as any)`
+        SELECT request_id, book_id, student_id, student_name, student_reg, book_title, book_isbn, status, requested_at
+        FROM "BookRequest"
+        ORDER BY requested_at DESC
+      `
+      if (rows) {
+        let list = rows
+        if (filter?.studentId) {
+          list = list.filter((r: any) => r.student_id === filter.studentId)
+        }
+        if (filter?.status) {
+          list = list.filter((r: any) => r.status === filter.status)
+        }
+        return { success: true, requests: list }
+      }
+    } catch (e: any) {
+      console.warn('[DB] getBookRequests Neon query warning:', e.message)
+    }
+  }
+
+  let list = Array.from(memoryStore.bookRequests.values())
+  if (filter?.studentId) {
+    list = list.filter((r) => r.student_id === filter.studentId)
+  }
+  if (filter?.status) {
+    list = list.filter((r) => r.status === filter.status)
+  }
+  return { success: true, requests: list }
+}
+
+/**
+ * Librarian approves or rejects a student book request
+ */
+export async function resolveBookRequest(requestId: string, action: 'approve' | 'reject') {
+  const req = memoryStore.bookRequests.get(requestId)
+  if (req) {
+    req.status = action === 'approve' ? 'APPROVED' : 'REJECTED'
+  }
+
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        UPDATE "BookRequest" SET status = ${action === 'approve' ? 'APPROVED' : 'REJECTED'}
+        WHERE request_id = ${requestId}
+      `
+    } catch (e: any) {
+      console.warn('[DB] resolveBookRequest Neon update warning:', e.message)
+    }
+  }
+
+  if (action === 'approve') {
+    const studentId = req?.student_id || ''
+    const bookId = req?.book_id || ''
+    if (studentId && bookId) {
+      await issueBook(studentId, bookId)
+    }
+  }
+
+  return { success: true, status: action === 'approve' ? 'APPROVED' : 'REJECTED' }
+}
+
+/**
+ * Retrieves all currently active (open) book loans
+ */
+export async function listActiveLoans(studentId?: string) {
+  let loans = Array.from(memoryStore.bookLoans.values()).filter((l) => l.return_date === null)
+  if (studentId) {
+    loans = loans.filter((l) => l.student_id === studentId)
+  }
+  return loans.map((l) => {
+    const book = memoryStore.books.get(l.book_id)
+    const student = memoryStore.students.get(l.student_id)
+    return {
+      ...l,
+      title: book?.title || 'Unknown Book',
+      isbn: book?.isbn || 'N/A',
+      student_name: student?.name || 'Student',
+      student_reg: student?.reg_no || l.student_id,
+    }
+  })
 }

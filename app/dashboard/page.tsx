@@ -37,18 +37,26 @@ export default function LiveMapPage() {
       try {
         const data = JSON.parse(event.data)
         if (Array.isArray(data)) {
-          setDesks(data.map((d: any) => ({
-            id: d.id,
-            row: d.row,
-            seat: d.seat,
-            status: (d.status ?? 'free').toLowerCase() as Desk['status'],
-            occupiedSince: null,
-            durationText: null,
-            occupantId: null,
-            occupantName: null,
-            hasPower: Boolean(d.hasPower),
-            isWindow: Boolean(d.isWindow),
-          })))
+          setDesks(data.map((d: any) => {
+            const startMs = d.occupiedSince ? new Date(d.occupiedSince).getTime() : NaN
+            const elapsedMins = !isNaN(startMs) ? Math.max(0, Math.floor((Date.now() - startMs) / 60000)) : 0
+            const durationText = !isNaN(startMs)
+              ? elapsedMins >= 60 ? `${Math.floor(elapsedMins / 60)}h ${elapsedMins % 60}m` : `${elapsedMins}m`
+              : null
+
+            return {
+              id: d.id,
+              row: d.row,
+              seat: d.seat,
+              status: (d.status ?? 'free').toLowerCase() as Desk['status'],
+              occupiedSince: d.occupiedSince ? new Date(d.occupiedSince).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+              durationText,
+              occupantId: d.occupantRegNo || d.occupantId || d.occupantEmail || null,
+              occupantName: d.occupantName || null,
+              hasPower: Boolean(d.hasPower),
+              isWindow: Boolean(d.isWindow),
+            }
+          }))
           setLastUpdatedTime(0)
         }
       } catch (err: any) {

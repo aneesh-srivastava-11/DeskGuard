@@ -86,49 +86,62 @@ INSERT INTO "SystemSettings" (key, value) VALUES
   ('max_books_per_student', '2')
 ON CONFLICT (key) DO NOTHING;
 
--- Seed Desks (D01 - D40)
+-- 8. BookRequest Table
+CREATE TABLE IF NOT EXISTS "BookRequest" (
+  request_id VARCHAR(64) PRIMARY KEY,
+  book_id VARCHAR(64) NOT NULL,
+  student_id VARCHAR(64) NOT NULL REFERENCES "Student"(student_id) ON DELETE CASCADE,
+  student_name VARCHAR(100) NOT NULL,
+  student_reg VARCHAR(50) NOT NULL,
+  book_title VARCHAR(255) NOT NULL,
+  book_isbn VARCHAR(50) NOT NULL,
+  status VARCHAR(20) DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+  requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seed Desks (D01 - D40: All initialized to free)
 INSERT INTO "Desk" (desk_id, row_label, seat_number, status, has_power, is_window) VALUES
   ('D01', 'A', 1, 'free', true, true),
-  ('D02', 'A', 2, 'occupied', true, true),
-  ('D03', 'A', 3, 'occupied', false, true),
+  ('D02', 'A', 2, 'free', true, true),
+  ('D03', 'A', 3, 'free', false, true),
   ('D04', 'A', 4, 'free', true, false),
-  ('D05', 'A', 5, 'away', true, false),
-  ('D06', 'B', 1, 'occupied', true, false),
-  ('D07', 'B', 2, 'abandoned', false, false),
+  ('D05', 'A', 5, 'free', true, false),
+  ('D06', 'B', 1, 'free', true, false),
+  ('D07', 'B', 2, 'free', false, false),
   ('D08', 'B', 3, 'free', true, false),
-  ('D09', 'B', 4, 'occupied', true, false),
+  ('D09', 'B', 4, 'free', true, false),
   ('D10', 'B', 5, 'free', false, false),
   ('D11', 'C', 1, 'free', true, false),
-  ('D12', 'C', 2, 'occupied', true, false),
-  ('D13', 'C', 3, 'occupied', false, false),
-  ('D14', 'C', 4, 'occupied', true, false),
-  ('D15', 'C', 5, 'away', true, false),
+  ('D12', 'C', 2, 'free', true, false),
+  ('D13', 'C', 3, 'free', false, false),
+  ('D14', 'C', 4, 'free', true, false),
+  ('D15', 'C', 5, 'free', true, false),
   ('D16', 'D', 1, 'free', true, false),
   ('D17', 'D', 2, 'free', false, false),
-  ('D18', 'D', 3, 'occupied', true, false),
-  ('D19', 'D', 4, 'abandoned', false, false),
-  ('D20', 'D', 5, 'occupied', true, false),
-  ('D21', 'E', 1, 'occupied', true, false),
+  ('D18', 'D', 3, 'free', true, false),
+  ('D19', 'D', 4, 'free', false, false),
+  ('D20', 'D', 5, 'free', true, false),
+  ('D21', 'E', 1, 'free', true, false),
   ('D22', 'E', 2, 'free', true, false),
-  ('D23', 'E', 3, 'occupied', false, false),
-  ('D24', 'E', 4, 'occupied', true, false),
+  ('D23', 'E', 3, 'free', false, false),
+  ('D24', 'E', 4, 'free', true, false),
   ('D25', 'E', 5, 'free', true, false),
-  ('D26', 'F', 1, 'occupied', false, false),
-  ('D27', 'F', 2, 'away', true, false),
+  ('D26', 'F', 1, 'free', false, false),
+  ('D27', 'F', 2, 'free', true, false),
   ('D28', 'F', 3, 'free', true, false),
-  ('D29', 'F', 4, 'occupied', false, false),
-  ('D30', 'F', 5, 'occupied', true, false),
+  ('D29', 'F', 4, 'free', false, false),
+  ('D30', 'F', 5, 'free', true, false),
   ('D31', 'G', 1, 'free', true, false),
-  ('D32', 'G', 2, 'occupied', false, false),
-  ('D33', 'G', 3, 'occupied', true, false),
+  ('D32', 'G', 2, 'free', false, false),
+  ('D33', 'G', 3, 'free', true, false),
   ('D34', 'G', 4, 'free', true, false),
-  ('D35', 'G', 5, 'occupied', false, false),
-  ('D36', 'H', 1, 'occupied', true, false),
-  ('D37', 'H', 2, 'maintenance', false, false),
+  ('D35', 'G', 5, 'free', false, false),
+  ('D36', 'H', 1, 'free', true, false),
+  ('D37', 'H', 2, 'free', false, false),
   ('D38', 'H', 3, 'free', true, false),
-  ('D39', 'H', 4, 'occupied', false, false),
-  ('D40', 'H', 5, 'occupied', true, false)
-ON CONFLICT (desk_id) DO NOTHING;
+  ('D39', 'H', 4, 'free', false, false),
+  ('D40', 'H', 5, 'free', true, false)
+ON CONFLICT (desk_id) DO UPDATE SET status = 'free' WHERE "Desk".status != 'maintenance';
 
 -- Seed Books
 INSERT INTO "Book" (title, author, isbn, total_copies, available_copies) VALUES
