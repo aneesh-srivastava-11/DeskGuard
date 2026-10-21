@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'motion/react'
 import { GraduationCap, Eye, EyeOff, ShieldAlert, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
+import { getStudentDomain, getLibrarianDomain } from '@/lib/auth-utils'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -103,13 +104,13 @@ export default function LoginPage() {
                   id="email-input-field"
                   type="email"
                   required
-                  placeholder="you@muj.manipal.edu"
+                  placeholder={`you${getStudentDomain()}`}
                   className="w-full h-12 px-4 font-mono text-[13px] bg-[var(--bg-dark)] border border-[var(--border-custom)] rounded-[12px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[#FF6B1A] focus:border-[#FF6B1A] transition-all"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
                 <span className="font-sans text-[11px] text-[var(--text-muted)] mt-1.5 block">
-                  @muj.manipal.edu → Student &nbsp;|&nbsp; @jaipur.manipal.edu → Faculty
+                  {getStudentDomain()} → Student &nbsp;|&nbsp; {getLibrarianDomain()} → Faculty / Librarian
                 </span>
               </div>
 

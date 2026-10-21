@@ -66,50 +66,72 @@ The application is structured into **7 core flows/screens**:
 ## ⚙️ Local Setup and Installation
 
 ### 1. Prerequisites
-Ensure you have **Node.js (v18.x or higher)** and an active **Supabase** instance (either cloud or local).
+Ensure you have **Node.js (v18.x or higher)** and active instances of:
+- **Neon Serverless PostgreSQL** (free cloud DB at [neon.tech](https://neon.tech))
+- **Firebase Authentication** (Google Firebase project with Email/Password sign-in enabled)
 
-### 2. Database Schema setup
-Run the SQL definitions file located in [supabase/schema.sql](supabase/schema.sql) in your Supabase SQL Editor. This script:
-- Creates the tables (`students`, `desks`, `sessions`, `books`, `book_issues`, `settings`).
-- Enables Row Level Security (RLS) policies.
-- Registers real-time listeners for the `desks` table.
-- Defines core database RPC functions (`checkin_desk`, `release_desk`, `mark_away`, `mark_back`, `issue_book`, `return_book`).
-- Schedules a cron sweeping job (`sweep-desks`) to automatically release expired reservations and flag abandoned away sessions.
+### 2. Database Schema Setup
+Run the SQL definitions file located in [neon_schema.sql](neon_schema.sql) in your Neon SQL Editor. This script creates the 7 core tables:
+- `Student`, `Desk`, `Session`, `QRToken`, `Librarian`, `Book`, `BookLoan`
 
 ### 3. Environment Variables Setup
-Copy the environment template from `.env.example` into a new file named `.env.local` in the project root:
+Copy the environment template from `.env.example` into `.env.local` in the project root:
 
 ```ini
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-client-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-admin-service-role-key
+# Neon Serverless PostgreSQL Connection String
+DATABASE_URL=postgresql://user:password@ep-sample-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
 
-# QR Secret Key for HMAC signature generation (min 32 chars)
-QR_SECRET=a2b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7
+# Firebase Client Configuration (from Firebase Console -> Project Settings)
+NEXT_PUBLIC_FIREBASE_API_KEY=your-firebase-api-key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1234567890
+NEXT_PUBLIC_FIREBASE_APP_ID=1:1234567890:web:abcdef123456
 
-# Base App URL for redirect routing and QR code generation
+# Cryptographic QR HMAC Key (min 32 chars)
+QR_SECRET=your-64-character-qr-hmac-secret-key-here
+
+# Base App URL
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Institutional Email Domains
+NEXT_PUBLIC_STUDENT_EMAIL_DOMAIN=@muj.manipal.edu
+NEXT_PUBLIC_LIBRARIAN_EMAIL_DOMAIN=@jaipur.manipal.edu
 ```
 
-*Note: If environment variables are empty, the app falls back into a UI-only preview mode.*
-
 ### 4. Running the Development Server
-Install npm dependencies and launch the server:
-
 ```bash
 # Install packages
 npm install
 
-# Start local server
+# Seed Librarian and Students into database
+npm run seed:users
+
+# Run automated test suite (67 tests)
+npm test
+
+# Start local Next.js dev server
 npm run dev
 ```
 Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ---
 
-## 🔐 Auth & Role-Based Access Control (RBAC)
+## 🔐 Auth, Roles & Test Account Passwords
 
-The portal dynamically protects routes server-side using Next.js Edge middleware by inspecting authentication sessions synchronized to secure cookies. Domain routing rules apply based on the email domain used at registration/login:
-- **Librarians**: Email must end with `@jaipur.manipal.edu`. Granted access to the general dashboard, `/dashboard/admin`, and `/dashboard/book-management`.
-- **Students**: Email must end with `@muj.manipal.edu`. Granted access to the general dashboard, `/dashboard/session`, `/dashboard/books`, and `/dashboard/profile`.
+Authentication is handled via **Firebase Authentication** (Email & Password), with profile metadata synchronized to PostgreSQL.
+
+### Pre-Seeded Test Credentials
+
+To log into the portal, create these users in your **[Firebase Console](https://console.firebase.google.com/)** (**Authentication** → **Users** → **Add User**):
+
+| Role | Email Address | Password | Name / Reg No | Access Permissions |
+| :--- | :--- | :--- | :--- | :--- |
+| **Librarian (Admin)** | `librarian@jaipur.manipal.edu` | `DeskGuard@2026` | Head Librarian (`LIB-001`) | Full Admin Portal (`/dashboard/admin`), Desk Overrides, Maintenance Mode, User Management & Bulk CSV Import |
+| **Student 1** | `aneesh.219301001@muj.manipal.edu` | `DeskGuard@2026` | Aneesh Srivastava (`MUJ2024CSE0086`) | Live Seat Map, Check-in, Away Mode, Book Loans |
+| **Student 2** | `rohan.219302042@muj.manipal.edu` | `DeskGuard@2026` | Rohan Sharma (`MUJ2024ECE0042`) | Live Seat Map, Check-in, Away Mode, Book Loans |
+| **Student 3** | `priya.219303115@muj.manipal.edu` | `DeskGuard@2026` | Priya Patel (`MUJ2024IT0115`) | Live Seat Map, Check-in, Away Mode, Book Loans |
+
+> [!TIP]
+> **Database Profile Sync**: Run `npm run seed:users` at any time to automatically synchronize these accounts into your Neon PostgreSQL database.

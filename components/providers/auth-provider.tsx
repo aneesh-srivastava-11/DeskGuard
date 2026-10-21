@@ -9,6 +9,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth'
 import type { AppUser, UserRole } from '@/lib/types'
+import { determineUserRole } from '@/lib/auth-utils'
 
 interface AuthContextValue {
   user: AppUser | null
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       })
 
+      const calculatedRole = determineUserRole(fbUser.email)
       if (res.ok) {
         const data = await res.json()
         setUser({
@@ -46,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: fbUser.email ?? '',
           regNo: data.regNo ?? null,
           name: data.name ?? fbUser.email?.split('@')[0].replace(/\./g, ' ') ?? 'User',
-          role: (data.role ?? 'student') as UserRole,
+          role: (data.role || calculatedRole) as UserRole,
         })
       } else {
         // Fallback user if record not created in DB yet
@@ -55,17 +57,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: fbUser.email ?? '',
           regNo: null,
           name: fbUser.email?.split('@')[0].replace(/\./g, ' ') ?? 'User',
-          role: 'student',
+          role: calculatedRole,
         })
       }
     } catch (err: any) {
       console.error('[DeskGuard Auth]', err.message)
+      const calculatedRole = determineUserRole(fbUser.email)
       setUser({
         id: fbUser.uid,
         email: fbUser.email ?? '',
         regNo: null,
         name: fbUser.email?.split('@')[0].replace(/\./g, ' ') ?? 'User',
-        role: 'student',
+        role: calculatedRole,
       })
     }
   }, [])

@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Bell, QrCode, RefreshCw, Zap, X } from 'lucide-react'
+import { Bell, QrCode, RefreshCw, Zap, X, Users } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useToast } from '@/components/providers/toast-provider'
+import { UserManagementModal } from '@/components/admin/UserManagementModal'
 import type { Desk } from '@/lib/types'
 
 export default function LibrarianDashboardPage() {
@@ -16,6 +17,7 @@ export default function LibrarianDashboardPage() {
   
   const [pendingCount, setPendingCount] = useState(0)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [userManagementOpen, setUserManagementOpen] = useState(false)
 
   const abandonedDesks = desks.filter((d) => d.status === 'abandoned')
 
@@ -129,12 +131,22 @@ export default function LibrarianDashboardPage() {
           </div>
         </div>
         
-        <div className="relative">
-          <button onClick={() => setNotificationsOpen(!notificationsOpen)}
-            className="p-2 bg-[var(--surface)] border border-[var(--border-custom)] rounded-full hover:bg-[var(--elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all relative cursor-pointer">
-            {notifications.length > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[#DC2626] rounded-full" />}
-            <Bell className="w-4 h-4" />
+        <div className="flex items-center gap-2.5">
+          <button
+            id="btn-manage-users"
+            onClick={() => setUserManagementOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--surface)] border border-[var(--border-custom)] rounded-full hover:bg-[var(--elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all text-xs font-mono font-medium cursor-pointer"
+          >
+            <Users className="w-3.5 h-3.5 text-[#FF6B1A]" />
+            <span className="hidden sm:inline">Manage Users</span>
           </button>
+
+          <div className="relative">
+            <button onClick={() => setNotificationsOpen(!notificationsOpen)}
+              className="p-2 bg-[var(--surface)] border border-[var(--border-custom)] rounded-full hover:bg-[var(--elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all relative cursor-pointer">
+              {notifications.length > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[#DC2626] rounded-full" />}
+              <Bell className="w-4 h-4" />
+            </button>
 
           {notificationsOpen && (
             <div className="absolute right-0 mt-2 w-80 bg-[var(--surface)] border border-[var(--border-custom)] rounded-[12px] shadow-xl z-50 p-4 space-y-3">
@@ -181,6 +193,7 @@ export default function LibrarianDashboardPage() {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -303,6 +316,12 @@ export default function LibrarianDashboardPage() {
           </div>
         </div>
       )}
+
+      {/* User Management Directory & Bulk Import Modal */}
+      <UserManagementModal
+        isOpen={userManagementOpen}
+        onClose={() => setUserManagementOpen(false)}
+      />
     </div>
   )
 }

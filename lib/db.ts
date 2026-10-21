@@ -691,3 +691,145 @@ export async function getDeskSessionHistory(rawDeskId: string) {
     sessions: deskSessions,
   }
 }
+
+// ─── User Management (Single Create & Bulk Import) ────────────────────────────
+
+export interface UserInput {
+  id?: string
+  name: string
+  email: string
+  regNo?: string
+  role?: 'student' | 'librarian'
+  branch?: string
+  batchYear?: number
+}
+
+/**
+ * Creates or updates a single user in PostgreSQL and memoryStore
+ */
+export async function createOrUpdateUser(input: UserInput) {
+  const email = (input.email || '').trim().toLowerCase()
+  if (!email || !input.name) {
+    return { error: 'Name and valid email are required' }
+  }
+
+  const role: 'student' | 'librarian' = input.role || (email.includes('jaipur.manipal.edu') ? 'librarian' : 'student')
+  const studentId = input.id || input.regNo || `usr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const regNo = input.regNo || studentId
+
+  const record: DBStudent = {
+    student_id: studentId,
+    reg_no: regNo,
+    name: input.name.trim(),
+    email,
+    role,
+    created_at: new Date().toISOString(),
+  }
+
+  // Always update memoryStore (fast lookup + test suite isolation)
+  memoryStore.students.set(studentId, record)
+
+  // Sync to Neon Postgres if available
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await sql`
+        INSERT INTO "Student" (student_id, reg_no, name, email, role)
+        VALUES (${studentId}, ${regNo}, ${record.name}, ${email}, ${role})
+        ON CONFLICT (student_id) DO UPDATE
+        SET name = EXCLUDED.name, reg_no = EXCLUDED.reg_no, email = EXCLUDED.email, role = EXCLUDED.role;
+      `
+
+      if (role === 'librarian') {
+        await sql`
+          INSERT INTO "Librarian" (librarian_id, name, email)
+          VALUES (${studentId}, ${record.name}, ${email})
+          ON CONFLICT (librarian_id) DO UPDATE
+          SET name = EXCLUDED.name, email = EXCLUDED.email;
+        `
+      }
+    } catch (err: any) {
+      console.warn('[DB User Upsert Warning]:', err.message)
+    }
+  }
+
+  return { success: true, user: record }
+}
+
+/**
+ * Bulk imports an array of users with validation and conflict handling
+ */
+export async function bulkImportUsers(inputs: UserInput[]) {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    return { error: 'Empty or invalid user array' }
+  }
+
+  let imported = 0
+  let updated = 0
+  const errors: string[] = []
+  const createdUsers: DBStudent[] = []
+
+  for (let i = 0; i < inputs.length; i++) {
+    const item = inputs[i]
+    if (!item.name || !item.email) {
+      errors.push(`Row ${i + 1}: Name and email required`)
+      continue
+    }
+
+    try {
+      const isExisting = Array.from(memoryStore.students.values()).some(
+        (s) => s.email.toLowerCase() === item.email.toLowerCase() || (item.regNo && s.reg_no === item.regNo)
+      )
+
+      const res = await createOrUpdateUser(item)
+      if (res.success && res.user) {
+        createdUsers.push(res.user)
+        if (isExisting) {
+          updated++
+        } else {
+          imported++
+        }
+      } else {
+        errors.push(`Row ${i + 1}: ${res.error || 'Failed to process'}`)
+      }
+    } catch (err: any) {
+      errors.push(`Row ${i + 1}: ${err.message}`)
+    }
+  }
+
+  return {
+    success: true,
+    total: inputs.length,
+    imported,
+    updated,
+    errors,
+    users: createdUsers,
+  }
+}
+
+/**
+ * Retrieves list of users with optional search query & role filter
+ */
+export async function listUsers(filter?: { search?: string; role?: string; limit?: number }) {
+  let list = Array.from(memoryStore.students.values())
+
+  if (filter?.role) {
+    list = list.filter((u) => u.role === filter.role)
+  }
+
+  if (filter?.search) {
+    const q = filter.search.toLowerCase().trim()
+    list = list.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        u.reg_no.toLowerCase().includes(q)
+    )
+  }
+
+  const limit = filter?.limit || 100
+  return {
+    success: true,
+    count: list.length,
+    users: list.slice(0, limit),
+  }
+}
