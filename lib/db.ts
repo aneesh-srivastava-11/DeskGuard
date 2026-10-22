@@ -139,26 +139,28 @@ function initMemoryStore(): MemoryStore {
     created_at: new Date().toISOString(),
   })
 
-  // Test loans from pp.pdf (L-31, L-32) - seeded as open active loans ready to test return
-  bookLoans.set('L-31', {
-    loan_id: 'L-31',
-    student_id: 'MUJ2024CSE0086',
-    book_id: 'B-101',
-    issue_date: '2026-09-24T10:00:00.000Z',
-    due_date: '2026-10-10T23:59:59.000Z',
-    return_date: null,
-    fine: 0,
-  })
+  // Test loans from pp.pdf (L-31, L-32) - only seeded in automated test runner (NODE_ENV === 'test')
+  if (process.env.NODE_ENV === 'test') {
+    bookLoans.set('L-31', {
+      loan_id: 'L-31',
+      student_id: 'MUJ2024CSE0086',
+      book_id: 'B-101',
+      issue_date: '2026-09-24T10:00:00.000Z',
+      due_date: '2026-10-10T23:59:59.000Z',
+      return_date: null,
+      fine: 0,
+    })
 
-  bookLoans.set('L-32', {
-    loan_id: 'L-32',
-    student_id: 'MUJ2024CSE0086',
-    book_id: 'B-101',
-    issue_date: '2026-09-15T10:00:00.000Z',
-    due_date: '2026-10-01T23:59:59.000Z',
-    return_date: null,
-    fine: 0,
-  })
+    bookLoans.set('L-32', {
+      loan_id: 'L-32',
+      student_id: 'MUJ2024CSE0086',
+      book_id: 'B-101',
+      issue_date: '2026-09-15T10:00:00.000Z',
+      due_date: '2026-10-01T23:59:59.000Z',
+      return_date: null,
+      fine: 0,
+    })
+  }
 
   return { students, desks, sessions, books, bookLoans, bookRequests }
 }
@@ -756,6 +758,21 @@ export async function issueBook(
   memoryStore.bookLoans.set(loanId, loan)
   targetBook.available_copies = Math.max(0, targetBook.available_copies - 1)
 
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        INSERT INTO "BookLoan" (loan_id, student_id, book_id, issue_date, due_date, return_date, fine)
+        VALUES (${loanId}, ${studentId}, ${targetBook.book_id}, ${loan.issue_date}, ${loan.due_date}, NULL, 0)
+      `
+      await (realNeon as any)`
+        UPDATE "Book" SET available_copies = GREATEST(0, available_copies - 1) WHERE book_id = ${targetBook.book_id}
+      `
+    } catch (e: any) {
+      console.warn('[DB] issueBook Neon sync warning:', e.message)
+    }
+  }
+
   return {
     success: true,
     loan,
@@ -802,6 +819,23 @@ export async function returnBook(
   const book = memoryStore.books.get(loan.book_id)
   if (book) {
     book.available_copies = Math.min(book.total_copies, book.available_copies + 1)
+  }
+
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      await (realNeon as any)`
+        UPDATE "BookLoan" 
+        SET return_date = ${loan.return_date}, fine = ${fine}
+        WHERE loan_id = ${loanId}
+      `
+      const targetBookId = loan.book_id
+      await (realNeon as any)`
+        UPDATE "Book" SET available_copies = LEAST(total_copies, available_copies + 1) WHERE book_id = ${targetBookId}
+      `
+    } catch (e: any) {
+      console.warn('[DB] returnBook Neon sync warning:', e.message)
+    }
   }
 
   return {
@@ -1192,6 +1226,40 @@ export async function resolveBookRequest(requestId: string, action: 'approve' | 
  * Retrieves all currently active (open) book loans
  */
 export async function listActiveLoans(studentId?: string) {
+  // Query live Neon PostgreSQL database in production
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      const rows = await (realNeon as any)`
+        SELECT 
+          bl.loan_id,
+          bl.student_id,
+          bl.book_id,
+          bl.issue_date,
+          bl.due_date,
+          bl.return_date,
+          bl.fine,
+          b.title,
+          b.isbn,
+          COALESCE(s.name, 'Student') AS student_name,
+          COALESCE(s.reg_no, bl.student_id) AS student_reg
+        FROM "BookLoan" bl
+        LEFT JOIN "Book" b ON b.book_id = bl.book_id
+        LEFT JOIN "Student" s ON s.student_id = bl.student_id
+        WHERE bl.return_date IS NULL
+        ORDER BY bl.due_date ASC
+      `
+      if (Array.isArray(rows)) {
+        let list = rows
+        if (studentId) {
+          list = list.filter((l: any) => l.student_id === studentId)
+        }
+        return list
+      }
+    } catch (e: any) {
+      console.warn('[DB] listActiveLoans Neon query warning:', e.message)
+    }
+  }
+
   let loans = Array.from(memoryStore.bookLoans.values()).filter((l) => l.return_date === null)
   if (studentId) {
     loans = loans.filter((l) => l.student_id === studentId)

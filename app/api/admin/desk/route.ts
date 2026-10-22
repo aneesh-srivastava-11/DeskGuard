@@ -18,7 +18,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'maintenance') {
-      const result = await setDeskMaintenance(deskId, isMaintenance !== false)
+      const enable = isMaintenance === true || isMaintenance === 'true'
+      const result = await setDeskMaintenance(deskId, enable)
       if (result.error) {
         return NextResponse.json({ error: result.error, message: result.message }, { status: 400 })
       }
