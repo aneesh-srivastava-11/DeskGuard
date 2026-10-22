@@ -190,9 +190,26 @@ export function normalizeDeskId(id: string): string {
 
 const realNeon = neon(DATABASE_URL)
 
+// Auto-heal legacy seeded maintenance desk D37 if stuck in maintenance
+let legacyD37Healed = false
+async function autoHealLegacyDesks() {
+  if (legacyD37Healed || isPlaceholderDb || process.env.NODE_ENV === 'test') return
+  legacyD37Healed = true
+  try {
+    await (realNeon as any)`
+      UPDATE "Desk" SET status = 'free', updated_at = NOW() WHERE desk_id = 'D37' AND status = 'maintenance'
+    `
+  } catch (err: any) {
+    // Ignore if offline or schema differs
+  }
+}
+
 export const sql: any = async (strings: TemplateStringsArray, ...values: any[]) => {
   if (!isPlaceholderDb) {
     try {
+      if (!legacyD37Healed) {
+        await autoHealLegacyDesks()
+      }
       return await (realNeon as any)(strings, ...values)
     } catch (err: any) {
       console.warn('[DB] Falling back to memory store:', err.message)
@@ -344,6 +361,22 @@ export async function checkinDesk(rawDeskId: string, studentId: string) {
         targetDesk.updated_at = new Date().toISOString()
       }
 
+      // Sync returned from away to Neon PostgreSQL
+      if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+        try {
+          await (realNeon as any)`
+            UPDATE "Session"
+            SET status = 'ACTIVE', away_started_at = NULL, last_confirmed_at = NOW()
+            WHERE session_id = ${activeSession.session_id}
+          `
+          await (realNeon as any)`
+            UPDATE "Desk" SET status = 'occupied', updated_at = NOW() WHERE desk_id = ${deskId}
+          `
+        } catch (e: any) {
+          console.warn('[DB] Neon checkinDesk returned_from_away warning:', e.message)
+        }
+      }
+
       return {
         success: true,
         mode: 'returned_from_away',
@@ -407,6 +440,13 @@ export async function checkinDesk(rawDeskId: string, studentId: string) {
   // Sync to Neon PostgreSQL if active database is connected
   if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
     try {
+      // Ensure student exists in Neon to prevent foreign key violation
+      const safeId = studentId.slice(0, 64)
+      await (realNeon as any)`
+        INSERT INTO "Student" (student_id, reg_no, name, email, role)
+        VALUES (${safeId}, ${'REG-' + safeId.slice(0, 10)}, 'Student', ${safeId + '@student.muj.edu'}, 'student')
+        ON CONFLICT (student_id) DO NOTHING
+      `
       await (realNeon as any)`
         INSERT INTO "Session" (session_id, student_id, desk_id, start_time, end_time, last_confirmed_at, status)
         VALUES (${sessionId}, ${studentId}, ${deskId}, ${now.toISOString()}, ${endTime.toISOString()}, ${now.toISOString()}, 'ACTIVE')
@@ -563,6 +603,23 @@ export async function setDeskMaintenance(rawDeskId: string, isMaintenance: boole
   }
 
   desk.updated_at = new Date().toISOString()
+
+  // Sync to Neon PostgreSQL if active database is connected
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      if (isMaintenance) {
+        await (realNeon as any)`
+          UPDATE "Session" SET status = 'RELEASED' WHERE desk_id = ${deskId} AND status IN ('ACTIVE', 'AWAY')
+        `
+      }
+      await (realNeon as any)`
+        UPDATE "Desk" SET status = ${isMaintenance ? 'maintenance' : 'free'}, updated_at = NOW() WHERE desk_id = ${deskId}
+      `
+    } catch (e: any) {
+      console.warn('[DB] setDeskMaintenance Neon sync warning:', e.message)
+    }
+  }
+
   return {
     success: true,
     desk_id: deskId,
@@ -606,6 +663,32 @@ export async function sweepDesks() {
         }
         expired++
       }
+    }
+  }
+
+  // Neon PostgreSQL sync
+  if (!isPlaceholderDb && process.env.NODE_ENV !== 'test') {
+    try {
+      const sweptAway = await (realNeon as any)`
+        UPDATE "Session"
+        SET status = 'ABANDONED'
+        WHERE status = 'AWAY' AND away_started_at <= NOW() - INTERVAL '30 minutes'
+        RETURNING desk_id
+      `
+      const sweptExpired = await (realNeon as any)`
+        UPDATE "Session"
+        SET status = 'EXPIRED'
+        WHERE status = 'ACTIVE' AND (end_time <= NOW() OR start_time <= NOW() - INTERVAL '3 hours')
+        RETURNING desk_id
+      `
+      const sweptDesks = [...(sweptAway || []), ...(sweptExpired || [])].map((r: any) => r.desk_id)
+      for (const dId of sweptDesks) {
+        await (realNeon as any)`
+          UPDATE "Desk" SET status = 'free', updated_at = NOW() WHERE desk_id = ${dId} AND status != 'maintenance'
+        `
+      }
+    } catch (e: any) {
+      console.warn('[DB] sweepDesks Neon sync warning:', e.message)
     }
   }
 
@@ -918,7 +1001,7 @@ export async function listUsers(filter?: { search?: string; role?: string; limit
         FROM "Student"
         ORDER BY created_at DESC
       `
-      if (rows && rows.length > 0) {
+      if (Array.isArray(rows)) {
         let list = rows
         if (filter?.role) {
           list = list.filter((u: any) => u.role === filter.role)

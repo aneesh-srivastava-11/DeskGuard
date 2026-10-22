@@ -405,6 +405,12 @@ export default function LiveMapPage() {
                         <QrCode className="w-4 h-4" /> Scan Reservation
                       </button>
                     )
+                  ) : selectedDesk.status === 'maintenance' ? (
+                    <div className="p-3.5 bg-[var(--bg-dark)] border border-[#6B7280]/30 rounded-[12px] text-center w-full">
+                      <span className="text-[11px] font-sans text-[#6B7280] font-medium leading-relaxed block">
+                        {isLibrarian ? 'Desk is in Maintenance Mode. Manage in Admin.' : 'Desk is currently Out of Service for Maintenance.'}
+                      </span>
+                    </div>
                   ) : (activeSession && activeSession.desk_id === selectedDesk.id) || isLibrarian ? (
                     <button onClick={() => { handleRelease(selectedDesk.id); setIsMobilePanelOpen(false) }}
                       className="w-full h-11 bg-[#EF4444] text-white font-display font-medium rounded-[12px] flex items-center justify-center gap-2 cursor-pointer text-xs uppercase shadow-md">

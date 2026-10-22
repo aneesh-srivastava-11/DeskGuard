@@ -140,8 +140,7 @@ INSERT INTO "Desk" (desk_id, row_label, seat_number, status, has_power, is_windo
   ('D37', 'H', 2, 'free', false, false),
   ('D38', 'H', 3, 'free', true, false),
   ('D39', 'H', 4, 'free', false, false),
-  ('D40', 'H', 5, 'free', true, false)
-ON CONFLICT (desk_id) DO UPDATE SET status = 'free' WHERE "Desk".status != 'maintenance';
+ON CONFLICT (desk_id) DO UPDATE SET status = 'free', has_power = EXCLUDED.has_power, is_window = EXCLUDED.is_window;
 
 -- Seed Books
 INSERT INTO "Book" (title, author, isbn, total_copies, available_copies) VALUES

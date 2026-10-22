@@ -34,13 +34,20 @@ export async function GET(req: NextRequest) {
     }
 
     const studentId = studentResult.length > 0 ? studentResult[0].student_id : uid.slice(0, 64)
+    const regNo = studentResult.length > 0 ? (studentResult[0].reg_no || '') : ''
 
     // Query active or away session
     const sessions = await sql`
       SELECT s.*, d.row_label, d.seat_number, d.has_power, d.is_window
       FROM "Session" s
       JOIN "Desk" d ON d.desk_id = s.desk_id
-      WHERE (s.student_id = ${studentId} OR s.student_id = ${uid} OR s.student_id = ${token})
+      WHERE (
+        s.student_id = ${studentId} 
+        OR s.student_id = ${uid} 
+        OR s.student_id = ${token}
+        OR (${regNo} != '' AND s.student_id = ${regNo})
+        OR (${email} != '' AND s.student_id = ${email})
+      )
         AND s.status IN ('ACTIVE', 'AWAY')
       ORDER BY s.start_time DESC
       LIMIT 1

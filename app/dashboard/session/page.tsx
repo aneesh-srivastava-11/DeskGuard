@@ -211,9 +211,10 @@ export default function SessionPage() {
     )
   }
 
-  const checkedInTime = new Date(sessionData.start_time)
+  const startTimeMs = parseSafeStartTime(sessionData.start_time)
+  const checkedInTime = new Date(startTimeMs)
   const checkedInTimeStr = checkedInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const expiresAtTime = new Date(checkedInTime.getTime() + sessionLimitHours * 3600 * 1000)
+  const expiresAtTime = new Date(startTimeMs + sessionLimitHours * 3600 * 1000)
   const expiresAtTimeStr = expiresAtTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   return (

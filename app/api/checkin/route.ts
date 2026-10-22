@@ -42,13 +42,17 @@ export async function POST(req: NextRequest) {
       studentId = studentResult.length > 0 ? studentResult[0].student_id : (uid.length > 64 ? uid.slice(0, 64) : uid)
     }
 
-    // Ensure student record exists in Student table
+    // Ensure student record exists in Student table if new
     const safeStudentId = studentId.slice(0, 64)
-    await sql`
-      INSERT INTO "Student" (student_id, reg_no, name, email, role)
-      VALUES (${safeStudentId}, ${'REG-' + safeStudentId.slice(0, 6)}, 'Student', ${studentEmail || safeStudentId + '@student.muj.edu'}, 'student')
-      ON CONFLICT (student_id) DO NOTHING
-    `
+    try {
+      await sql`
+        INSERT INTO "Student" (student_id, reg_no, name, email, role)
+        VALUES (${safeStudentId}, ${'REG-' + safeStudentId.slice(0, 8)}, 'Student', ${studentEmail || safeStudentId + '@student.muj.edu'}, 'student')
+        ON CONFLICT (student_id) DO NOTHING
+      `
+    } catch (err: any) {
+      console.warn('[Checkin] Fallback student insert warning:', err.message)
+    }
 
     // Execute check-in or away return via Neon DB helper
     const result = await checkinDesk(deskId, safeStudentId)

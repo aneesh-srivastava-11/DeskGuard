@@ -235,6 +235,12 @@ export function InfoPanel({ desk, currentUserId, activeSession, onReserve, onRel
                 <QrCode className="w-4 h-4" /> Scan Reservation
               </button>
             )
+          ) : desk.status === 'maintenance' ? (
+            <div className="p-3.5 bg-[var(--bg-dark)] border border-[#6B7280]/30 rounded-[12px] text-center">
+              <span className="text-[11px] font-sans text-[#6B7280] font-medium leading-relaxed block">
+                {isLibrarian ? 'Desk is currently in Maintenance Mode. Manage via Admin Portal.' : 'Desk is currently Out of Service for Maintenance.'}
+              </span>
+            </div>
           ) : (activeSession && activeSession.desk_id === desk.id) || isLibrarian ? (
             <button
               id="btn-self-desk-release"
