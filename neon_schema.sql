@@ -90,7 +90,7 @@ ON CONFLICT (key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS "BookRequest" (
   request_id VARCHAR(64) PRIMARY KEY,
   book_id VARCHAR(64) NOT NULL,
-  student_id VARCHAR(64) NOT NULL REFERENCES "Student"(student_id) ON DELETE CASCADE,
+  student_id VARCHAR(64) NOT NULL,
   student_name VARCHAR(100) NOT NULL,
   student_reg VARCHAR(50) NOT NULL,
   book_title VARCHAR(255) NOT NULL,
@@ -98,6 +98,15 @@ CREATE TABLE IF NOT EXISTS "BookRequest" (
   status VARCHAR(20) DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
   requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Seed Default Librarian Account
+INSERT INTO "Student" (student_id, reg_no, name, email, role) VALUES
+  ('LIB-001', 'LIB-001', 'Head Librarian', 'librarian@jaipur.manipal.edu', 'librarian')
+ON CONFLICT (student_id) DO NOTHING;
+
+INSERT INTO "Librarian" (librarian_id, name, email) VALUES
+  ('LIB-001', 'Head Librarian', 'librarian@jaipur.manipal.edu')
+ON CONFLICT (librarian_id) DO NOTHING;
 
 -- Seed Desks (D01 - D40: All initialized to free)
 INSERT INTO "Desk" (desk_id, row_label, seat_number, status, has_power, is_window) VALUES
@@ -140,6 +149,7 @@ INSERT INTO "Desk" (desk_id, row_label, seat_number, status, has_power, is_windo
   ('D37', 'H', 2, 'free', false, false),
   ('D38', 'H', 3, 'free', true, false),
   ('D39', 'H', 4, 'free', false, false),
+  ('D40', 'H', 5, 'free', true, false)
 ON CONFLICT (desk_id) DO UPDATE SET status = 'free', has_power = EXCLUDED.has_power, is_window = EXCLUDED.is_window;
 
 -- Seed Books
